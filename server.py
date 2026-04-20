@@ -6,11 +6,12 @@ import re
 import time
 from datetime import datetime
 from xml.etree import ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from bs4 import BeautifulSoup
 
-# ── Database setup (PostgreSQL if available, SQLite fallback) ─────────────────
+# ── Database setup ────────────────────────────────────────────────────────────
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
@@ -67,7 +68,7 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
-def safe_get(url, timeout=8):
+def safe_get(url, timeout=7):
     try:
         r = requests.get(url, headers=HEADERS, timeout=timeout)
         r.raise_for_status()
@@ -203,7 +204,7 @@ def scrape_reddit_hot(subreddit):
         r = requests.get(
             f"https://www.reddit.com/r/{subreddit}/hot.json?limit=8",
             headers={"User-Agent": "Trentradar/1.0"},
-            timeout=8
+            timeout=7
         )
         data = r.json()
         for post in data["data"]["children"]:
@@ -228,7 +229,7 @@ def scrape_google_trends_nl():
     try:
         r = requests.get(
             "https://trends.google.com/trends/trendingsearches/daily/rss?geo=NL",
-            headers=HEADERS, timeout=10
+            headers=HEADERS, timeout=8
         )
         root = ET.fromstring(r.content)
         ns = {"ht": "https://trends.google.com/trends/trendingsearches/daily"}
@@ -252,23 +253,27 @@ def scrape_google_trends_nl():
     return items
 
 def gather_all_headlines(region="nl"):
+    """Fetch all sources in parallel — much faster than sequential."""
     all_items = []
-    for scraper in [scrape_nu, scrape_ad, scrape_volkskrant, scrape_parool, scrape_libelle, scrape_linda, scrape_rtl]:
-        try:
-            all_items.extend(scraper())
-        except Exception as e:
-            print(f"[scraper error] {e}")
-    try:
-        all_items.extend(scrape_google_trends_nl())
-    except Exception as e:
-        print(f"[gtrends error] {e}")
     subreddits = ["Netherlands", "europe"] if region == "nl" else ["worldnews", "europe", "sociology"]
     subreddits += ["psychology", "TrueOffMyChest"]
-    for sub in subreddits:
-        try:
-            all_items.extend(scrape_reddit_hot(sub))
-        except Exception as e:
-            print(f"[reddit error] {e}")
+
+    scrapers = [
+        scrape_nu, scrape_ad, scrape_volkskrant, scrape_parool,
+        scrape_libelle, scrape_linda, scrape_rtl, scrape_google_trends_nl
+    ]
+    scrapers += [lambda s=s: scrape_reddit_hot(s) for s in subreddits]
+
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        futures = {executor.submit(fn): fn for fn in scrapers}
+        for future in as_completed(futures, timeout=15):
+            try:
+                result = future.result()
+                if result:
+                    all_items.extend(result)
+            except Exception as e:
+                print(f"[parallel error] {e}")
+
     return all_items
 
 # ── Slow trend / research scrapers ───────────────────────────────────────────
@@ -278,7 +283,7 @@ _research_cache = {"data": [], "fetched_at": 0}
 def scrape_rss(url, source_name, source_type="research", limit=5):
     items = []
     try:
-        r = requests.get(url, headers=HEADERS, timeout=10)
+        r = requests.get(url, headers=HEADERS, timeout=8)
         root = ET.fromstring(r.content)
         for item in root.findall(".//item")[:limit]:
             title_el = item.find("title")
@@ -316,10 +321,10 @@ def scrape_scp():
     return items[:5]
 
 def gather_research():
+    """Fetch all research sources in parallel."""
     if time.time() - _research_cache["fetched_at"] < 3600:
         return _research_cache["data"]
-    all_items = []
-    all_items.extend(scrape_scp())
+
     feeds = [
         ("https://www.cbs.nl/nl-nl/rss/artikelen", "CBS Statistiek", "research"),
         ("https://www.pewresearch.org/feed/", "Pew Research", "research"),
@@ -328,11 +333,20 @@ def gather_research():
         ("https://newsroom.spotify.com/feed/", "Spotify Newsroom", "culture"),
         ("https://newsroom.tiktok.com/en-us/rss", "TikTok Newsroom", "culture"),
     ]
-    for feed_url, name, ftype in feeds:
-        try:
-            all_items.extend(scrape_rss(feed_url, name, ftype, 4))
-        except Exception as e:
-            print(f"[feed/{name}] {e}")
+
+    tasks = [scrape_scp] + [lambda u=u, n=n, t=t: scrape_rss(u, n, t, 4) for u, n, t in feeds]
+    all_items = []
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(fn): fn for fn in tasks}
+        for future in as_completed(futures, timeout=20):
+            try:
+                result = future.result()
+                if result:
+                    all_items.extend(result)
+            except Exception as e:
+                print(f"[research parallel error] {e}")
+
     _research_cache["data"] = all_items
     _research_cache["fetched_at"] = time.time()
     print(f"[research] fetched {len(all_items)} items")
@@ -395,10 +409,7 @@ select { font-size: 12px; padding: 5px 12px; border-radius: 20px; border: 1px so
 .source-link:last-child { border-bottom: none; }
 .source-link:hover .sl-title { color: #185FA5; text-decoration: underline; }
 .sl-icon { font-size: 9px; font-weight: 700; color: #fff; border-radius: 4px; padding: 2px 5px; flex-shrink: 0; margin-top: 1px; }
-.sl-reddit { background: #E24B4A; }
-.sl-news { background: #185FA5; }
-.sl-trends { background: #1D9E75; }
-.sl-lifestyle { background: #BA7517; }
+.sl-reddit { background: #E24B4A; } .sl-news { background: #185FA5; } .sl-trends { background: #1D9E75; } .sl-lifestyle { background: #BA7517; }
 .sl-title { font-size: 12px; color: #1a1a1a; line-height: 1.4; }
 .sl-source { font-size: 10px; color: #aaa; margin-top: 1px; }
 .research-card { background: #fff; border: 1px solid #e8e8e8; border-left: 3px solid #9FE1CB; border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 8px; }
@@ -490,7 +501,6 @@ select { font-size: 12px; padding: 5px 12px; border-radius: 20px; border: 1px so
     <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
 
     <div class="grid">
-      <!-- Column 1: AI trend cards -->
       <div>
         <div class="tab-row">
           <div class="tab active" id="tab-t" onclick="switchTab('trends')">Cultural trends</div>
@@ -505,14 +515,10 @@ select { font-size: 12px; padding: 5px 12px; border-radius: 20px; border: 1px so
           <div id="formats-list"><div class="empty">Save some trends, then generate format ideas.</div></div>
         </div>
       </div>
-
-      <!-- Column 2: Slow trends / research -->
       <div>
         <div class="col-head">Slow trends — research &amp; reports</div>
         <div id="research-feed"><div class="empty"><span class="loader"></span>Loading...</div></div>
       </div>
-
-      <!-- Column 3: Live headlines + saved -->
       <div>
         <div class="col-head">Live headlines</div>
         <div id="signal-feed"><div class="empty">Headlines appear here after scanning.</div></div>
@@ -604,12 +610,12 @@ async function runScan() {
 
   var headlineText = headlines.length
     ? headlines.map(function(h){ return '- [' + h.source + '] ' + h.title + ' (' + h.url + ')'; }).join('\n')
-    : '(No live headlines — use training knowledge for Dutch cultural trends dated ' + new Date().toLocaleDateString('en-GB') + ')';
+    : '(No live headlines — use training knowledge for Dutch cultural trends)';
 
-  var horizonLabel = {emerging:'emerging (weak signals, not yet mainstream)',rising:'rising (growing momentum)',all:'all momentum stages'}[horizon];
+  var horizonLabel = {emerging:'emerging (weak signals)',rising:'rising (growing momentum)',all:'all momentum stages'}[horizon];
   var regionLabel = {nl:'Dutch / Netherlands',eu:'European',all:'global including NL'}[region];
 
-  var prompt = 'You are a cultural trend analyst for a Dutch unscripted TV format development team.\n\nReal headlines fetched NOW from Dutch meest-gelezen sections, Google Trends NL, and Reddit:\n\n' + headlineText + '\n\nIdentify ' + horizonLabel + ' human and cultural trends for ' + regionLabel + ' context.\nFocus: human connection, identity, belonging, loneliness, relationships, lifestyle, work, aging, youth, family, technology emotion.\n\nIMPORTANT: Reference actual headlines from the list as evidence. Use actual URLs provided.\n\nReturn ONLY a JSON object, starting with { and ending with }:\n{"trends":[{"name":"Trend name 3-5 words","momentum":"rising|emerging|established|shifting","desc":"Two sentences for a TV format developer.","signals":"Two specific observations from the headlines.","sourceLabels":["NU.nl","Reddit"],"sourceLinks":[{"title":"Exact headline title","url":"https://exact-url-from-list","source":"NU.nl","type":"news|reddit|trends|lifestyle"}],"formatHint":"One-line unscripted TV format angle."}]}\n\nGenerate exactly 5 trends. Only use URLs from the headlines list above.';
+  var prompt = 'You are a cultural trend analyst for a Dutch unscripted TV format development team.\n\nReal headlines fetched NOW from Dutch meest-gelezen sections, Google Trends NL, and Reddit:\n\n' + headlineText + '\n\nIdentify ' + horizonLabel + ' human and cultural trends for ' + regionLabel + ' context.\nFocus: human connection, identity, belonging, loneliness, relationships, lifestyle, work, aging, youth, family, technology emotion.\n\nReference actual headlines from the list as evidence. Use actual URLs provided.\n\nReturn ONLY a JSON object, starting with { and ending with }:\n{"trends":[{"name":"Trend name 3-5 words","momentum":"rising|emerging|established|shifting","desc":"Two sentences for a TV format developer.","signals":"Two specific observations from the headlines.","sourceLabels":["NU.nl","Reddit"],"sourceLinks":[{"title":"Exact headline title","url":"https://exact-url-from-list","source":"NU.nl","type":"news|reddit|trends|lifestyle"}],"formatHint":"One-line unscripted TV format angle."}]}\n\nGenerate exactly 5 trends. Only use URLs from the headlines list above.';
 
   try {
     var cr = await fetch('/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({max_tokens:2500, messages:[{role:'user',content:prompt}]}) });
@@ -759,11 +765,7 @@ function renderResearch(items) {
   if (!items.length) { el.innerHTML='<div class="empty">No research items found.</div>'; return; }
   var typeMap = {research:'Research',culture:'Culture',trends:'Trends'};
   el.innerHTML = items.map(function(item){
-    return '<div class="research-card">' +
-      '<div class="research-title"><a href="' + item.url + '" target="_blank">' + item.title + ' ↗</a></div>' +
-      (item.desc ? '<div class="research-desc">' + item.desc + '</div>' : '') +
-      '<div class="research-meta"><span class="r-source">' + item.source + '</span><span class="r-type">' + (typeMap[item.type]||item.type) + '</span>' + (item.pub ? '<span class="r-pub">' + item.pub + '</span>' : '') + '</div>' +
-    '</div>';
+    return '<div class="research-card"><div class="research-title"><a href="' + item.url + '" target="_blank">' + item.title + ' ↗</a></div>' + (item.desc ? '<div class="research-desc">' + item.desc + '</div>' : '') + '<div class="research-meta"><span class="r-source">' + item.source + '</span><span class="r-type">' + (typeMap[item.type]||item.type) + '</span>' + (item.pub ? '<span class="r-pub">' + item.pub + '</span>' : '') + '</div></div>';
   }).join('');
 }
 
