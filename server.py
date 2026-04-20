@@ -39,9 +39,9 @@ else:
 def init_db():
     conn = get_db()
     cur = db_cursor(conn)
-    cur.execute(f"""
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS saved_trends (
-            id {PK_DEF},
+            id """ + PK_DEF + """,
             name TEXT NOT NULL,
             desc TEXT,
             momentum TEXT,
@@ -74,10 +74,8 @@ def safe_get(url, timeout=7):
         r.raise_for_status()
         return BeautifulSoup(r.text, "html.parser")
     except Exception as e:
-        print(f"[scraper] Failed {url}: {e}")
+        print("[scraper] Failed {}: {}".format(url, e))
         return None
-
-# ── Fast signal scrapers ──────────────────────────────────────────────────────
 
 def scrape_nu():
     items = []
@@ -93,7 +91,7 @@ def scrape_nu():
                     items.append({"title": title, "url": url, "source": "NU.nl"})
                     seen.add(title)
     except Exception as e:
-        print(f"[nu.nl] {e}")
+        print("[nu.nl] {}".format(e))
     return items[:6]
 
 def scrape_ad():
@@ -110,7 +108,7 @@ def scrape_ad():
                     items.append({"title": title, "url": url, "source": "AD.nl"})
                     seen.add(title)
     except Exception as e:
-        print(f"[ad.nl] {e}")
+        print("[ad.nl] {}".format(e))
     return items[:6]
 
 def scrape_volkskrant():
@@ -127,7 +125,7 @@ def scrape_volkskrant():
                     items.append({"title": title, "url": url, "source": "de Volkskrant"})
                     seen.add(title)
     except Exception as e:
-        print(f"[volkskrant] {e}")
+        print("[volkskrant] {}".format(e))
     return items[:6]
 
 def scrape_parool():
@@ -144,13 +142,13 @@ def scrape_parool():
                     items.append({"title": title, "url": url, "source": "Het Parool"})
                     seen.add(title)
     except Exception as e:
-        print(f"[parool] {e}")
+        print("[parool] {}".format(e))
     return items[:6]
 
 def scrape_libelle():
     items = []
     try:
-        soup = safe_get("https://www.libelle.nl") or safe_get("https://www.libelle.nl/populair")
+        soup = safe_get("https://www.libelle.nl")
         if soup:
             seen = set()
             for a in soup.select("h2 a, h3 a, .article-title a, .card__title a")[:20]:
@@ -161,7 +159,7 @@ def scrape_libelle():
                     items.append({"title": title, "url": url, "source": "Libelle"})
                     seen.add(title)
     except Exception as e:
-        print(f"[libelle] {e}")
+        print("[libelle] {}".format(e))
     return items[:6]
 
 def scrape_linda():
@@ -178,13 +176,13 @@ def scrape_linda():
                     items.append({"title": title, "url": url, "source": "Linda.nl"})
                     seen.add(title)
     except Exception as e:
-        print(f"[linda] {e}")
+        print("[linda] {}".format(e))
     return items[:6]
 
 def scrape_rtl():
     items = []
     try:
-        soup = safe_get("https://www.rtlnieuws.nl") or safe_get("https://www.rtlnieuws.nl/meest-gelezen")
+        soup = safe_get("https://www.rtlnieuws.nl")
         if soup:
             seen = set()
             for a in soup.select("h2 a, h3 a, .article-title a, .card__title a")[:20]:
@@ -195,14 +193,14 @@ def scrape_rtl():
                     items.append({"title": title, "url": url, "source": "RTL Nieuws"})
                     seen.add(title)
     except Exception as e:
-        print(f"[rtl] {e}")
+        print("[rtl] {}".format(e))
     return items[:6]
 
 def scrape_reddit_hot(subreddit):
     items = []
     try:
         r = requests.get(
-            f"https://www.reddit.com/r/{subreddit}/hot.json?limit=8",
+            "https://www.reddit.com/r/{}/hot.json?limit=8".format(subreddit),
             headers={"User-Agent": "Trentradar/1.0"},
             timeout=7
         )
@@ -213,11 +211,11 @@ def scrape_reddit_hot(subreddit):
                 items.append({
                     "title": p["title"],
                     "url": "https://www.reddit.com" + p["permalink"],
-                    "source": f"r/{subreddit}",
+                    "source": "r/{}".format(subreddit),
                     "type": "reddit"
                 })
     except Exception as e:
-        print(f"[reddit/{subreddit}] {e}")
+        print("[reddit/{}] {}".format(subreddit, e))
     return items[:5]
 
 _gtrends_cache = {"data": [], "fetched_at": 0}
@@ -247,21 +245,19 @@ def scrape_google_trends_nl():
                     "type": "trends"
                 })
     except Exception as e:
-        print(f"[google trends] {e}")
+        print("[google trends] {}".format(e))
     _gtrends_cache["data"] = items
     _gtrends_cache["fetched_at"] = time.time()
     return items
 
 def gather_all_headlines(region="nl"):
-    """Fetch all sources in parallel — much faster than sequential."""
     all_items = []
-    subreddits = ["Netherlands", "europe"] if region == "nl" else ["worldnews", "europe", "sociology"]
-    subreddits += ["psychology", "TrueOffMyChest"]
+    subreddits = ["Netherlands", "europe", "psychology", "TrueOffMyChest"]
+    if region != "nl":
+        subreddits = ["worldnews", "europe", "sociology", "psychology"]
 
-    scrapers = [
-        scrape_nu, scrape_ad, scrape_volkskrant, scrape_parool,
-        scrape_libelle, scrape_linda, scrape_rtl, scrape_google_trends_nl
-    ]
+    scrapers = [scrape_nu, scrape_ad, scrape_volkskrant, scrape_parool,
+                scrape_libelle, scrape_linda, scrape_rtl, scrape_google_trends_nl]
     scrapers += [lambda s=s: scrape_reddit_hot(s) for s in subreddits]
 
     with ThreadPoolExecutor(max_workers=12) as executor:
@@ -272,11 +268,10 @@ def gather_all_headlines(region="nl"):
                 if result:
                     all_items.extend(result)
             except Exception as e:
-                print(f"[parallel error] {e}")
-
+                print("[parallel error] {}".format(e))
     return all_items
 
-# ── Slow trend / research scrapers ───────────────────────────────────────────
+# ── Research scrapers ─────────────────────────────────────────────────────────
 
 _research_cache = {"data": [], "fetched_at": 0}
 
@@ -297,7 +292,7 @@ def scrape_rss(url, source_name, source_type="research", limit=5):
             if title and link:
                 items.append({"title": title, "url": link, "desc": desc, "pub": pub, "source": source_name, "type": source_type})
     except Exception as e:
-        print(f"[rss/{source_name}] {e}")
+        print("[rss/{}] {}".format(source_name, e))
     return items
 
 def scrape_scp():
@@ -317,14 +312,12 @@ def scrape_scp():
                     if len(title) > 10:
                         items.append({"title": title, "url": url, "desc": desc, "pub": "", "source": "SCP", "type": "research"})
     except Exception as e:
-        print(f"[scp] {e}")
+        print("[scp] {}".format(e))
     return items[:5]
 
 def gather_research():
-    """Fetch all research sources in parallel."""
     if time.time() - _research_cache["fetched_at"] < 3600:
         return _research_cache["data"]
-
     feeds = [
         ("https://www.cbs.nl/nl-nl/rss/artikelen", "CBS Statistiek", "research"),
         ("https://www.pewresearch.org/feed/", "Pew Research", "research"),
@@ -333,10 +326,8 @@ def gather_research():
         ("https://newsroom.spotify.com/feed/", "Spotify Newsroom", "culture"),
         ("https://newsroom.tiktok.com/en-us/rss", "TikTok Newsroom", "culture"),
     ]
-
     tasks = [scrape_scp] + [lambda u=u, n=n, t=t: scrape_rss(u, n, t, 4) for u, n, t in feeds]
     all_items = []
-
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {executor.submit(fn): fn for fn in tasks}
         for future in as_completed(futures, timeout=20):
@@ -345,11 +336,9 @@ def gather_research():
                 if result:
                     all_items.extend(result)
             except Exception as e:
-                print(f"[research parallel error] {e}")
-
+                print("[research parallel error] {}".format(e))
     _research_cache["data"] = all_items
     _research_cache["fetched_at"] = time.time()
-    print(f"[research] fetched {len(all_items)} items")
     return all_items
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
@@ -425,7 +414,6 @@ select { font-size: 12px; padding: 5px 12px; border-radius: 20px; border: 1px so
 .signal-item:last-child { border-bottom: none; }
 .sig-dot { width: 6px; height: 6px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
 .sig-text { font-size: 12px; color: #1a1a1a; line-height: 1.4; }
-.sig-meta { font-size: 10px; color: #aaa; margin-top: 1px; }
 .sig-link { font-size: 10px; color: #185FA5; text-decoration: none; display: block; margin-top: 1px; }
 .sig-link:hover { text-decoration: underline; }
 .src-group-label { font-size: 10px; font-weight: 600; color: #bbb; text-transform: uppercase; letter-spacing: 0.5px; margin: 10px 0 4px; }
@@ -459,7 +447,7 @@ select { font-size: 12px; padding: 5px 12px; border-radius: 20px; border: 1px so
 <body>
 <div class="dash">
   <div class="top-bar">
-    <div class="logo">Trentradar <span>— live cultural signals for unscripted formats</span></div>
+    <div class="logo">Trentradar <span>&#8212; live cultural signals for unscripted formats</span></div>
     <div class="controls" id="scan-controls">
       <select id="region-sel">
         <option value="nl">NL focus</option>
@@ -482,20 +470,20 @@ select { font-size: 12px; padding: 5px 12px; border-radius: 20px; border: 1px so
 
   <div id="view-dashboard">
     <div class="source-bar">
-      <span class="src-tag on" data-src="NU.nl" onclick="this.classList.toggle('on')">NU.nl</span>
-      <span class="src-tag on" data-src="AD.nl" onclick="this.classList.toggle('on')">AD.nl</span>
-      <span class="src-tag on" data-src="Volkskrant" onclick="this.classList.toggle('on')">Volkskrant</span>
-      <span class="src-tag on" data-src="Parool" onclick="this.classList.toggle('on')">Parool</span>
-      <span class="src-tag on" data-src="Libelle" onclick="this.classList.toggle('on')">Libelle</span>
-      <span class="src-tag on" data-src="Linda.nl" onclick="this.classList.toggle('on')">Linda.nl</span>
-      <span class="src-tag on" data-src="RTL Nieuws" onclick="this.classList.toggle('on')">RTL Nieuws</span>
-      <span class="src-tag on" data-src="Reddit" onclick="this.classList.toggle('on')">Reddit</span>
-      <span class="src-tag on" data-src="Google Trends NL" onclick="this.classList.toggle('on')">Google Trends NL</span>
+      <span class="src-tag on">NU.nl</span>
+      <span class="src-tag on">AD.nl</span>
+      <span class="src-tag on">Volkskrant</span>
+      <span class="src-tag on">Parool</span>
+      <span class="src-tag on">Libelle</span>
+      <span class="src-tag on">Linda.nl</span>
+      <span class="src-tag on">RTL Nieuws</span>
+      <span class="src-tag on">Reddit</span>
+      <span class="src-tag on">Google Trends NL</span>
     </div>
     <div id="err-box"></div>
     <div id="info-box"></div>
     <div class="status-row">
-      <span id="status-text">Last scan: —</span>
+      <span id="status-text">Last scan: &#8212;</span>
       <span id="headline-count"></span>
     </div>
     <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
@@ -516,8 +504,8 @@ select { font-size: 12px; padding: 5px 12px; border-radius: 20px; border: 1px so
         </div>
       </div>
       <div>
-        <div class="col-head">Slow trends — research &amp; reports</div>
-        <div id="research-feed"><div class="empty"><span class="loader"></span>Loading...</div></div>
+        <div class="col-head">Slow trends &#8212; research &amp; reports</div>
+        <div id="research-feed"><div class="empty">Research loads when you scan.</div></div>
       </div>
       <div>
         <div class="col-head">Live headlines</div>
@@ -552,8 +540,6 @@ select { font-size: 12px; padding: 5px 12px; border-radius: 20px; border: 1px so
 var saved = [];
 var trends = [];
 
-window.addEventListener('load', function() { loadResearch(); });
-
 function switchView(v) {
   document.getElementById('view-dashboard').style.display = v==='dashboard' ? '' : 'none';
   document.getElementById('view-archive').style.display = v==='archive' ? '' : 'none';
@@ -575,75 +561,85 @@ function clearErr() { document.getElementById('err-box').innerHTML = ''; documen
 function showInfo(msg) { document.getElementById('info-box').innerHTML = '<div class="infobox">' + msg + '</div>'; }
 function setProgress(p) { document.getElementById('progress-fill').style.width = p + '%'; }
 
-async function runScan() {
+function runScan() {
   clearErr();
   var btn = document.getElementById('scan-btn');
-  btn.disabled = true; btn.textContent = 'Scanning...';
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
   setProgress(10);
   document.getElementById('status-text').innerHTML = '<span class="loader"></span>Fetching live headlines...';
   document.getElementById('headline-count').textContent = '';
   document.getElementById('trends-list').innerHTML = '<div class="empty"><span class="loader"></span>Fetching meest gelezen...</div>';
   document.getElementById('signal-feed').innerHTML = '<div class="empty"><span class="loader"></span>Loading headlines...</div>';
+  document.getElementById('research-feed').innerHTML = '<div class="empty"><span class="loader"></span>Loading research...</div>';
 
   var region = document.getElementById('region-sel').value;
   var horizon = document.getElementById('horizon-sel').value;
-  var headlines = [];
 
-  try {
-    var r = await fetch('/scrape', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({region:region}) });
-    var d = await r.json();
-    headlines = d.items || [];
+  fetch('/scrape', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({region: region})
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    var headlines = d.items || [];
     setProgress(40);
     document.getElementById('headline-count').textContent = headlines.length + ' headlines fetched';
     renderHeadlines(headlines);
-  } catch(e) {
-    showErr('Could not fetch headlines: ' + e.message);
-    btn.disabled = false; btn.textContent = 'Scan now';
+    loadResearch();
+    return synthesizeTrends(headlines, region, horizon);
+  })
+  .then(function() {
+    btn.disabled = false;
+    btn.textContent = 'Scan now';
+  })
+  .catch(function(e) {
+    showErr('Scan failed: ' + e.message);
+    document.getElementById('status-text').textContent = 'Scan failed.';
+    document.getElementById('trends-list').innerHTML = '<div class="empty">See error above.</div>';
     setProgress(0);
-    return;
-  }
+    btn.disabled = false;
+    btn.textContent = 'Scan now';
+  });
+}
 
-  if (!headlines.length) showInfo('No headlines fetched — using AI knowledge for trend synthesis.');
-
+function synthesizeTrends(headlines, region, horizon) {
   document.getElementById('status-text').innerHTML = '<span class="loader"></span>Synthesizing trends...';
   setProgress(65);
 
   var headlineText = headlines.length
-    ? headlines.map(function(h){ return '- [' + h.source + '] ' + h.title + ' (' + h.url + ')'; }).join('\n')
-    : '(No live headlines — use training knowledge for Dutch cultural trends)';
+    ? headlines.map(function(h) { return '- [' + h.source + '] ' + h.title + ' (' + h.url + ')'; }).join('\\n')
+    : '(No live headlines available - use training knowledge for Dutch cultural trends)';
 
-  var horizonLabel = {emerging:'emerging (weak signals)',rising:'rising (growing momentum)',all:'all momentum stages'}[horizon];
-  var regionLabel = {nl:'Dutch / Netherlands',eu:'European',all:'global including NL'}[region];
+  var horizonLabel = {emerging:'emerging (weak signals)', rising:'rising (growing momentum)', all:'all momentum stages'}[horizon] || 'emerging';
+  var regionLabel = {nl:'Dutch / Netherlands', eu:'European', all:'global including NL'}[region] || 'Dutch';
 
-  var prompt = 'You are a cultural trend analyst for a Dutch unscripted TV format development team.\n\nReal headlines fetched NOW from Dutch meest-gelezen sections, Google Trends NL, and Reddit:\n\n' + headlineText + '\n\nIdentify ' + horizonLabel + ' human and cultural trends for ' + regionLabel + ' context.\nFocus: human connection, identity, belonging, loneliness, relationships, lifestyle, work, aging, youth, family, technology emotion.\n\nReference actual headlines from the list as evidence. Use actual URLs provided.\n\nReturn ONLY a JSON object, starting with { and ending with }:\n{"trends":[{"name":"Trend name 3-5 words","momentum":"rising|emerging|established|shifting","desc":"Two sentences for a TV format developer.","signals":"Two specific observations from the headlines.","sourceLabels":["NU.nl","Reddit"],"sourceLinks":[{"title":"Exact headline title","url":"https://exact-url-from-list","source":"NU.nl","type":"news|reddit|trends|lifestyle"}],"formatHint":"One-line unscripted TV format angle."}]}\n\nGenerate exactly 5 trends. Only use URLs from the headlines list above.';
+  var prompt = 'You are a cultural trend analyst for a Dutch unscripted TV format development team.\\n\\nReal headlines fetched NOW from Dutch meest-gelezen sections, Google Trends NL, and Reddit:\\n\\n' + headlineText + '\\n\\nIdentify ' + horizonLabel + ' human and cultural trends for ' + regionLabel + ' context.\\nFocus: human connection, identity, belonging, loneliness, relationships, lifestyle, work, aging, youth, family, technology emotion.\\n\\nReference actual headlines from the list as evidence. Use actual URLs provided.\\n\\nReturn ONLY a JSON object, starting with { and ending with }:\\n{"trends":[{"name":"Trend name 3-5 words","momentum":"rising|emerging|established|shifting","desc":"Two sentences for a TV format developer.","signals":"Two specific observations from the headlines.","sourceLabels":["NU.nl","Reddit"],"sourceLinks":[{"title":"Exact headline title","url":"https://exact-url-from-list","source":"NU.nl","type":"news|reddit|trends|lifestyle"}],"formatHint":"One-line unscripted TV format angle."}]}\\n\\nGenerate exactly 5 trends. Only use URLs from the headlines list above.';
 
-  try {
-    var cr = await fetch('/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({max_tokens:2500, messages:[{role:'user',content:prompt}]}) });
-    var cd = await cr.json();
-    if (!cr.ok) throw new Error(cd.error || cr.status);
-    var text = cd.content.filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('\n');
-    var cleaned = text.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
-    var match = cleaned.match(/\{[\s\S]*\}/);
+  return fetch('/chat', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({max_tokens: 2500, messages: [{role: 'user', content: prompt}]})
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(cd) {
+    var text = cd.content.filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('\\n');
+    var cleaned = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();
+    var match = cleaned.match(/\\{[\\s\\S]*\\}/);
     if (!match) throw new Error('No JSON in response');
     var result = JSON.parse(match[0]);
     if (!result.trends || !result.trends.length) throw new Error('No trends in response');
     trends = result.trends;
     setProgress(100);
     renderTrends(region);
-    var now = new Date().toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'});
-    document.getElementById('status-text').textContent = 'Last scan: ' + now + ' — ' + headlines.length + ' live headlines';
-    if (!headlines.length) showInfo('Trends from AI knowledge (live scraping returned 0 headlines).');
-  } catch(e) {
-    showErr('Trend synthesis failed: ' + e.message);
-    document.getElementById('status-text').textContent = 'Scan failed.';
-    document.getElementById('trends-list').innerHTML = '<div class="empty">See error above.</div>';
-    setProgress(0);
-  }
-  btn.disabled = false; btn.textContent = 'Scan now';
+    var now = new Date().toLocaleTimeString('nl-NL', {hour: '2-digit', minute: '2-digit'});
+    document.getElementById('status-text').textContent = 'Last scan: ' + now + ' \u2014 ' + headlines.length + ' live headlines';
+  });
 }
 
 function srcColor(src) {
-  src = (src||'').toLowerCase();
+  src = (src || '').toLowerCase();
   if (src.indexOf('reddit') > -1) return '#E24B4A';
   if (src.indexOf('google') > -1) return '#1D9E75';
   if (src === 'libelle' || src === 'linda.nl') return '#BA7517';
@@ -652,7 +648,7 @@ function srcColor(src) {
 
 function renderHeadlines(headlines) {
   var el = document.getElementById('signal-feed');
-  if (!headlines.length) { el.innerHTML='<div class="empty">No headlines fetched.</div>'; return; }
+  if (!headlines.length) { el.innerHTML = '<div class="empty">No headlines fetched.</div>'; return; }
   var bySource = {};
   headlines.forEach(function(h) {
     if (!bySource[h.source]) bySource[h.source] = [];
@@ -661,8 +657,8 @@ function renderHeadlines(headlines) {
   var html = '';
   Object.keys(bySource).forEach(function(src) {
     html += '<div class="src-group-label">' + src + '</div>';
-    bySource[src].slice(0,3).forEach(function(h) {
-      html += '<div class="signal-item"><div class="sig-dot" style="background:' + srcColor(src) + '"></div><div><div class="sig-text">' + h.title + '</div>' + (h.url ? '<a class="sig-link" href="' + h.url + '" target="_blank">lees meer ↗</a>' : '') + '</div></div>';
+    bySource[src].slice(0, 3).forEach(function(h) {
+      html += '<div class="signal-item"><div class="sig-dot" style="background:' + srcColor(src) + '"></div><div><div class="sig-text">' + h.title + '</div>' + (h.url ? '<a class="sig-link" href="' + h.url + '" target="_blank">lees meer &#8599;</a>' : '') + '</div></div>';
     });
   });
   el.innerHTML = html;
@@ -670,143 +666,153 @@ function renderHeadlines(headlines) {
 
 function renderTrends(region) {
   var el = document.getElementById('trends-list');
-  if (!trends.length) { el.innerHTML='<div class="empty">No trends detected.</div>'; return; }
-  el.innerHTML = trends.map(function(t,i) {
-    var isSaved = saved.find(function(s){return s.name===t.name;});
-    var mc = {rising:'m-rising',emerging:'m-emerging',established:'m-established',shifting:'m-shifting'}[t.momentum]||'m-emerging';
+  if (!trends.length) { el.innerHTML = '<div class="empty">No trends detected.</div>'; return; }
+  el.innerHTML = trends.map(function(t, i) {
+    var isSaved = saved.find(function(s) { return s.name === t.name; });
+    var mc = {rising:'m-rising', emerging:'m-emerging', established:'m-established', shifting:'m-shifting'}[t.momentum] || 'm-emerging';
     var links = t.sourceLinks || [];
-    var iconCls = {reddit:'sl-reddit',news:'sl-news',trends:'sl-trends',lifestyle:'sl-lifestyle'};
-    var iconLbl = {reddit:'R',news:'N',trends:'G',lifestyle:'L'};
+    var iconCls = {reddit:'sl-reddit', news:'sl-news', trends:'sl-trends', lifestyle:'sl-lifestyle'};
+    var iconLbl = {reddit:'R', news:'N', trends:'G', lifestyle:'L'};
     var linksHtml = links.map(function(l) {
       var cls = iconCls[l.type] || 'sl-news';
       var lbl = iconLbl[l.type] || 'N';
       return '<a class="source-link" href="' + l.url + '" target="_blank"><span class="sl-icon ' + cls + '">' + lbl + '</span><div><div class="sl-title">' + l.title + '</div><div class="sl-source">' + l.source + '</div></div></a>';
     }).join('');
-    return '<div class="trend-card' + (isSaved?' saved':'') + '" id="tc-' + i + '">' +
+    return '<div class="trend-card' + (isSaved ? ' saved' : '') + '" id="tc-' + i + '">' +
       '<div class="trend-top"><div class="trend-name">' + t.name + '</div><span class="mbadge ' + mc + '">' + t.momentum + '</span></div>' +
       '<div class="trend-desc">' + t.desc + '</div>' +
       '<div class="trend-signals">' + t.signals + '</div>' +
       '<div class="trend-footer">' +
-        '<div style="display:flex;gap:4px;flex-wrap:wrap">' + (t.sourceLabels||[]).map(function(s){return '<span class="src-chip">'+s+'</span>';}).join('') + '</div>' +
+        '<div style="display:flex;gap:4px;flex-wrap:wrap">' + (t.sourceLabels || []).map(function(s) { return '<span class="src-chip">' + s + '</span>'; }).join('') + '</div>' +
         '<div style="display:flex;gap:6px">' +
-          (links.length ? '<button class="act-btn" onclick="toggleBox(\'src-'+i+'\')">sources ('+links.length+')</button>' : '') +
-          (t.formatHint ? '<button class="act-btn" onclick="toggleBox(\'hint-'+i+'\')">format hint</button>' : '') +
-          '<button class="act-btn' + (isSaved?' is-saved':'') + '" id="sb-'+i+'" onclick="doSave('+i+',\''+region+'\')">' + (isSaved?'saved':'save') + '</button>' +
+          (links.length ? '<button class="act-btn" onclick="toggleBox(\'src-' + i + '\')">sources (' + links.length + ')</button>' : '') +
+          (t.formatHint ? '<button class="act-btn" onclick="toggleBox(\'hint-' + i + '\')">format hint</button>' : '') +
+          '<button class="act-btn' + (isSaved ? ' is-saved' : '') + '" id="sb-' + i + '" onclick="doSave(' + i + ',\'' + region + '\')">' + (isSaved ? 'saved' : 'save') + '</button>' +
         '</div>' +
       '</div>' +
-      '<div class="expand-box" id="src-'+i+'">' + (linksHtml||'<div style="font-size:12px;color:#aaa">No source links.</div>') + '</div>' +
-      '<div class="expand-box" id="hint-'+i+'" style="font-size:12px;font-style:italic;color:#185FA5">' + (t.formatHint||'') + '</div>' +
+      '<div class="expand-box" id="src-' + i + '">' + (linksHtml || '<div style="font-size:12px;color:#aaa">No source links.</div>') + '</div>' +
+      '<div class="expand-box" id="hint-' + i + '" style="font-size:12px;font-style:italic;color:#185FA5">' + (t.formatHint || '') + '</div>' +
     '</div>';
   }).join('');
 }
 
 function toggleBox(id) {
   var el = document.getElementById(id);
-  if (el) el.style.display = el.style.display==='block' ? 'none' : 'block';
+  if (el) el.style.display = el.style.display === 'block' ? 'none' : 'block';
 }
 
-async function doSave(i, region) {
+function doSave(i, region) {
   var t = trends[i];
-  if (saved.find(function(s){return s.name===t.name;})) return;
-  saved.push({name:t.name, desc:t.desc, tag:''});
-  document.getElementById('sb-'+i).textContent='saved';
-  document.getElementById('sb-'+i).classList.add('is-saved');
-  document.getElementById('tc-'+i).classList.add('saved');
+  if (saved.find(function(s) { return s.name === t.name; })) return;
+  saved.push({name: t.name, desc: t.desc, tag: ''});
+  document.getElementById('sb-' + i).textContent = 'saved';
+  document.getElementById('sb-' + i).classList.add('is-saved');
+  document.getElementById('tc-' + i).classList.add('saved');
   renderSaved();
-  try {
-    await fetch('/archive/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name:t.name,desc:t.desc,momentum:t.momentum,signals:t.signals,source_labels:t.sourceLabels||[],source_links:t.sourceLinks||[],format_hint:t.formatHint,tag:'',region:region||'nl'}) });
-  } catch(e) { console.error('archive save failed', e); }
+  fetch('/archive/save', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: t.name, desc: t.desc, momentum: t.momentum, signals: t.signals, source_labels: t.sourceLabels || [], source_links: t.sourceLinks || [], format_hint: t.formatHint, tag: '', region: region || 'nl'})
+  }).catch(function(e) { console.error('archive save failed', e); });
 }
 
 function renderSaved() {
   var el = document.getElementById('saved-list');
   document.getElementById('gen-row').style.display = saved.length ? '' : 'none';
-  if (!saved.length) { el.innerHTML='<div class="empty">No saved trends yet.</div>'; return; }
-  el.innerHTML = saved.map(function(t,i){
-    return '<div class="saved-item"><div style="font-size:13px;color:#1a1a1a;flex:1">' + t.name + '</div><div style="display:flex;gap:6px;align-items:center"><input class="tag-input" placeholder="tag..." value="' + t.tag + '" oninput="saved['+i+'].tag=this.value"/><span style="cursor:pointer;font-size:12px;color:#aaa" onclick="saved.splice('+i+',1);renderSaved()">&#x2715;</span></div></div>';
+  if (!saved.length) { el.innerHTML = '<div class="empty">No saved trends yet.</div>'; return; }
+  el.innerHTML = saved.map(function(t, i) {
+    return '<div class="saved-item"><div style="font-size:13px;color:#1a1a1a;flex:1">' + t.name + '</div><div style="display:flex;gap:6px;align-items:center"><input class="tag-input" placeholder="tag..." value="' + t.tag + '" oninput="saved[' + i + '].tag=this.value"/><span style="cursor:pointer;font-size:12px;color:#aaa" onclick="saved.splice(' + i + ',1);renderSaved()">&#x2715;</span></div></div>';
   }).join('');
 }
 
-async function generateFormats() {
+function generateFormats() {
   if (!saved.length) return;
   switchTab('formats');
-  document.getElementById('formats-list').innerHTML='<div class="empty"><span class="loader"></span>Generating format concepts...</div>';
-  var trendList = saved.map(function(t,i){return (i+1)+'. "'+t.name+'": '+t.desc+(t.tag?' [tag: '+t.tag+']':'');}).join('\n');
-  var prompt = 'You are a senior unscripted TV format developer at a Dutch production company (KRO-NCRV, BNNVARA, Talpa). Generate format concepts from these cultural trends spotted in Dutch media today:\n\n' + trendList + '\n\nReturn ONLY a JSON object starting with { ending with }:\n{"formats":[{"title":"Format title","logline":"One punchy sentence.","trendBasis":"Which trend(s)","hook":"What makes this emotionally compelling for Dutch audience?","channel":"e.g. NPO1, RTL4, Netflix NL"}]}\n\nGenerate exactly 3 specific, pitchable format concepts.';
-  try {
-    var r = await fetch('/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({max_tokens:1200,messages:[{role:'user',content:prompt}]})});
-    var d = await r.json();
-    var text = d.content.filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('\n');
-    var match = text.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim().match(/\{[\s\S]*\}/);
+  document.getElementById('formats-list').innerHTML = '<div class="empty"><span class="loader"></span>Generating format concepts...</div>';
+  var trendList = saved.map(function(t, i) { return (i + 1) + '. "' + t.name + '": ' + t.desc + (t.tag ? ' [tag: ' + t.tag + ']' : ''); }).join('\\n');
+  var prompt = 'You are a senior unscripted TV format developer at a Dutch production company (KRO-NCRV, BNNVARA, Talpa). Generate format concepts from these cultural trends spotted in Dutch media today:\\n\\n' + trendList + '\\n\\nReturn ONLY a JSON object starting with { ending with }:\\n{"formats":[{"title":"Format title","logline":"One punchy sentence.","trendBasis":"Which trend(s)","hook":"What makes this emotionally compelling for Dutch audience?","channel":"e.g. NPO1, RTL4, Netflix NL"}]}\\n\\nGenerate exactly 3 specific, pitchable format concepts.';
+  fetch('/chat', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({max_tokens: 1200, messages: [{role: 'user', content: prompt}]})
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    var text = d.content.filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('\\n');
+    var match = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim().match(/\\{[\\s\\S]*\\}/);
     if (!match) throw new Error('No JSON');
     var result = JSON.parse(match[0]);
-    document.getElementById('formats-list').innerHTML = result.formats.map(function(f){
-      return '<div class="format-card"><div class="format-title">'+f.title+'</div><div class="format-desc">'+f.logline+'</div><div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><span class="src-chip">'+f.channel+'</span><span class="src-chip" style="font-style:italic">'+f.trendBasis+'</span></div><div class="format-hook">"'+f.hook+'"</div></div>';
+    document.getElementById('formats-list').innerHTML = result.formats.map(function(f) {
+      return '<div class="format-card"><div class="format-title">' + f.title + '</div><div class="format-desc">' + f.logline + '</div><div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><span class="src-chip">' + f.channel + '</span><span class="src-chip" style="font-style:italic">' + f.trendBasis + '</span></div><div class="format-hook">"' + f.hook + '"</div></div>';
     }).join('');
-  } catch(e) {
+  })
+  .catch(function(e) {
     showErr('Format generation failed: ' + e.message);
-    document.getElementById('formats-list').innerHTML='<div class="empty">Failed.</div>';
-  }
+    document.getElementById('formats-list').innerHTML = '<div class="empty">Failed.</div>';
+  });
 }
 
-async function loadResearch() {
-  document.getElementById('research-feed').innerHTML = '<div class="empty"><span class="loader"></span>Loading research...</div>';
-  try {
-    var r = await fetch('/research');
-    var d = await r.json();
-    renderResearch(d.items || []);
-  } catch(e) {
+function loadResearch() {
+  fetch('/research')
+  .then(function(r) { return r.json(); })
+  .then(function(d) { renderResearch(d.items || []); })
+  .catch(function() {
     document.getElementById('research-feed').innerHTML = '<div class="empty">Could not load research feed.</div>';
-  }
+  });
 }
 
 function renderResearch(items) {
   var el = document.getElementById('research-feed');
-  if (!items.length) { el.innerHTML='<div class="empty">No research items found.</div>'; return; }
-  var typeMap = {research:'Research',culture:'Culture',trends:'Trends'};
-  el.innerHTML = items.map(function(item){
-    return '<div class="research-card"><div class="research-title"><a href="' + item.url + '" target="_blank">' + item.title + ' ↗</a></div>' + (item.desc ? '<div class="research-desc">' + item.desc + '</div>' : '') + '<div class="research-meta"><span class="r-source">' + item.source + '</span><span class="r-type">' + (typeMap[item.type]||item.type) + '</span>' + (item.pub ? '<span class="r-pub">' + item.pub + '</span>' : '') + '</div></div>';
+  if (!items.length) { el.innerHTML = '<div class="empty">No research items found.</div>'; return; }
+  var typeMap = {research: 'Research', culture: 'Culture', trends: 'Trends'};
+  el.innerHTML = items.map(function(item) {
+    return '<div class="research-card"><div class="research-title"><a href="' + item.url + '" target="_blank">' + item.title + ' &#8599;</a></div>' +
+      (item.desc ? '<div class="research-desc">' + item.desc + '</div>' : '') +
+      '<div class="research-meta"><span class="r-source">' + item.source + '</span><span class="r-type">' + (typeMap[item.type] || item.type) + '</span>' +
+      (item.pub ? '<span class="r-pub">' + item.pub + '</span>' : '') + '</div></div>';
   }).join('');
 }
 
-async function loadArchive() {
+function loadArchive() {
   document.getElementById('date-list').innerHTML = '<div class="empty" style="padding:1rem 0"><span class="loader"></span></div>';
-  try {
-    var r = await fetch('/archive/dates');
-    var d = await r.json();
+  fetch('/archive/dates')
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
     if (!d.dates || !d.dates.length) {
       document.getElementById('date-list').innerHTML = '<div class="empty" style="padding:1rem 0;font-size:12px">No archived trends yet.</div>';
       return;
     }
-    document.getElementById('date-list').innerHTML = d.dates.map(function(x){
-      return '<div class="date-item" onclick="loadDate(\''+x.date+'\',this)">'+x.date+'<span class="date-count">'+x.count+'</span></div>';
+    document.getElementById('date-list').innerHTML = d.dates.map(function(x) {
+      return '<div class="date-item" onclick="loadDate(\'' + x.date + '\',this)">' + x.date + '<span class="date-count">' + x.count + '</span></div>';
     }).join('');
     var first = document.querySelector('.date-item');
     if (first) first.click();
-  } catch(e) {
-    document.getElementById('archive-err').innerHTML = '<div class="errbox">Could not load archive: '+e.message+'</div>';
-  }
+  })
+  .catch(function(e) {
+    document.getElementById('archive-err').innerHTML = '<div class="errbox">Could not load archive: ' + e.message + '</div>';
+  });
 }
 
-async function loadDate(date, el) {
-  document.querySelectorAll('.date-item').forEach(function(d){d.classList.remove('active');});
+function loadDate(date, el) {
+  document.querySelectorAll('.date-item').forEach(function(d) { d.classList.remove('active'); });
   el.classList.add('active');
   document.getElementById('archive-heading').textContent = 'Saved on ' + date;
   document.getElementById('archive-content').innerHTML = '<div class="empty"><span class="loader"></span></div>';
-  try {
-    var r = await fetch('/archive/by-date?date=' + encodeURIComponent(date));
-    var d = await r.json();
-    if (!d.trends || !d.trends.length) { document.getElementById('archive-content').innerHTML='<div class="empty">No trends for this date.</div>'; return; }
-    document.getElementById('archive-content').innerHTML = d.trends.map(function(t){
-      var mc = {rising:'m-rising',emerging:'m-emerging',established:'m-established',shifting:'m-shifting'}[t.momentum]||'m-emerging';
+  fetch('/archive/by-date?date=' + encodeURIComponent(date))
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (!d.trends || !d.trends.length) { document.getElementById('archive-content').innerHTML = '<div class="empty">No trends for this date.</div>'; return; }
+    document.getElementById('archive-content').innerHTML = d.trends.map(function(t) {
+      var mc = {rising:'m-rising', emerging:'m-emerging', established:'m-established', shifting:'m-shifting'}[t.momentum] || 'm-emerging';
       var links = [];
-      try { links = JSON.parse(t.source_links||'[]'); } catch(e) {}
-      var linksHtml = links.map(function(l){ return '<a href="'+l.url+'" target="_blank" style="display:block;font-size:11px;color:#185FA5;margin-top:3px;text-decoration:none">'+l.title+' ↗</a>'; }).join('');
-      return '<div class="archive-card"><div class="arch-top"><div class="arch-name">'+t.name+'</div><span class="mbadge '+mc+'">'+(t.momentum||'')+'</span></div><div class="arch-meta">'+t.saved_at+(t.region?' &middot; '+t.region.toUpperCase():'')+(t.tag?' &middot; <strong>'+t.tag+'</strong>':'')+'</div><div class="arch-desc">'+(t.desc||'')+'</div>'+linksHtml+'</div>';
+      try { links = JSON.parse(t.source_links || '[]'); } catch(e) {}
+      var linksHtml = links.map(function(l) { return '<a href="' + l.url + '" target="_blank" style="display:block;font-size:11px;color:#185FA5;margin-top:3px;text-decoration:none">' + l.title + ' &#8599;</a>'; }).join('');
+      return '<div class="archive-card"><div class="arch-top"><div class="arch-name">' + t.name + '</div><span class="mbadge ' + mc + '">' + (t.momentum || '') + '</span></div><div class="arch-meta">' + t.saved_at + (t.region ? ' &middot; ' + t.region.toUpperCase() : '') + (t.tag ? ' &middot; <strong>' + t.tag + '</strong>' : '') + '</div><div class="arch-desc">' + (t.desc || '') + '</div>' + linksHtml + '</div>';
     }).join('');
-  } catch(e) {
-    document.getElementById('archive-content').innerHTML='<div class="empty">Could not load.</div>';
-  }
+  })
+  .catch(function() {
+    document.getElementById('archive-content').innerHTML = '<div class="empty">Could not load.</div>';
+  });
 }
 </script>
 </body>
@@ -848,7 +854,7 @@ def archive_save():
     conn = get_db()
     cur = db_cursor(conn)
     cur.execute(
-        f"INSERT INTO saved_trends (name, desc, momentum, signals, source_labels, source_links, format_hint, tag, region, saved_at) VALUES ({PLACEHOLDER},{PLACEHOLDER},{PLACEHOLDER},{PLACEHOLDER},{PLACEHOLDER},{PLACEHOLDER},{PLACEHOLDER},{PLACEHOLDER},{PLACEHOLDER},{PLACEHOLDER})",
+        "INSERT INTO saved_trends (name, desc, momentum, signals, source_labels, source_links, format_hint, tag, region, saved_at) VALUES (" + ",".join([PLACEHOLDER]*10) + ")",
         (body.get("name"), body.get("desc"), body.get("momentum"), body.get("signals"),
          json.dumps(body.get("source_labels", [])), json.dumps(body.get("source_links", [])),
          body.get("format_hint"), body.get("tag", ""), body.get("region", "nl"),
@@ -874,7 +880,7 @@ def archive_by_date():
     date = request.args.get("date", "")
     conn = get_db()
     cur = db_cursor(conn)
-    cur.execute(f"SELECT * FROM saved_trends WHERE substr(saved_at, 1, 10) = {PLACEHOLDER} ORDER BY saved_at DESC", (date,))
+    cur.execute("SELECT * FROM saved_trends WHERE substr(saved_at, 1, 10) = " + PLACEHOLDER + " ORDER BY saved_at DESC", (date,))
     rows = cur.fetchall()
     cur.close()
     conn.close()
