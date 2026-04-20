@@ -337,6 +337,102 @@ def gather_research():
     _research_cache["fetched_at"] = time.time()
     return all_items
 
+# ── Google Sheets format database ────────────────────────────────────────────
+
+SHEET_ID = "1hriKOJaETWO69ty29cMuR9CPTvMa1X4N"
+_formats_cache = {"data": [], "fetched_at": 0}
+
+def get_formats_from_sheet():
+    """Fetch formats from Google Sheets using service account credentials."""
+    if time.time() - _formats_cache["fetched_at"] < 1800:
+        return _formats_cache["data"]
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+        if not creds_json:
+            print("[sheets] No GOOGLE_CREDENTIALS_JSON env var found")
+            return []
+        creds_dict = json.loads(creds_json)
+        scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        gc = gspread.authorize(creds)
+        sheet = gc.open_by_key(SHEET_ID).sheet1
+        rows = sheet.get_all_records()
+        formats = []
+        for row in rows:
+            title = str(row.get("Title", "") or row.get("title", "")).strip()
+            synopsis = str(row.get("Synopsis", "") or row.get("synopsis", "")).strip()
+            genre = str(row.get("Genre", "") or row.get("genre", "")).strip()
+            tags = str(row.get("Tags", "") or row.get("tags", "")).strip()
+            topic = str(row.get("Topic", "") or row.get("topic", "")).strip()
+            if title:
+                formats.append({
+                    "title": title,
+                    "synopsis": synopsis[:300],
+                    "genre": genre,
+                    "tags": tags,
+                    "topic": topic
+                })
+        _formats_cache["data"] = formats
+        _formats_cache["fetched_at"] = time.time()
+        print("[sheets] Loaded {} formats".format(len(formats)))
+        return formats
+    except Exception as e:
+        print("[sheets] Error: {}".format(e))
+        return []
+
+def match_formats_to_trend(trend_name, trend_desc, formats):
+    """Use Claude to find matching formats for a trend."""
+    if not formats:
+        return []
+    try:
+        # Send up to 60 formats to Claude for matching
+        sample = formats[:60]
+        format_list = "\n".join([
+            "{}. {} | Genre: {} | Topic: {} | Synopsis: {}".format(
+                i+1, f["title"], f["genre"], f["topic"], f["synopsis"][:150]
+            ) for i, f in enumerate(sample)
+        ])
+        anthropic_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        message = anthropic_client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=600,
+            messages=[{
+                "role": "user",
+                "content": (
+                    "You are a TV format analyst. Given this cultural trend and a list of TV formats, "
+                    "identify the 1-3 formats that are most thematically related to the trend.\n\n"
+                    "Trend: {}\n{}\n\n"
+                    "Format database:\n{}\n\n"
+                    "Return ONLY a JSON object starting with {{ ending with }}:\n"
+                    "{{\"matches\":[{{\"title\":\"Format title\",\"reason\":\"One sentence why this matches the trend\"}}]}}\n"
+                    "Return an empty matches array if nothing is relevant. Max 3 matches."
+                ).format(trend_name, trend_desc, format_list)
+            }]
+        )
+        text = message.content[0].text
+        cleaned = text.replace("```json\n", "").replace("```\n", "").replace("```", "").strip()
+        match = re.search(r'\{[\s\S]*\}', cleaned)
+        if match:
+            result = json.loads(match.group(0))
+            # Enrich matches with full format data
+            matches = result.get("matches", [])
+            enriched = []
+            for m in matches:
+                full = next((f for f in formats if f["title"].lower() == m["title"].lower()), None)
+                enriched.append({
+                    "title": m["title"],
+                    "reason": m.get("reason", ""),
+                    "genre": full["genre"] if full else "",
+                    "topic": full["topic"] if full else "",
+                    "synopsis": full["synopsis"][:150] if full else ""
+                })
+            return enriched
+    except Exception as e:
+        print("[match_formats] {}".format(e))
+    return []
+
 # ── Flask app ─────────────────────────────────────────────────────────────────
 
 app = Flask(__name__, template_folder=".")
@@ -859,113 +955,101 @@ _HTML_B64 = (
     "aXY+JzsKICB9CiAgZWwuaW5uZXJIVE1MID0gaHRtbDsKfQoKZnVuY3Rpb24gZ2VuZXJhdGVGb3Jt" +
     "YXRzKCkgewogIGlmICghc2F2ZWQubGVuZ3RoKSByZXR1cm47CiAgc3dpdGNoVGFiKCdmb3JtYXRz" +
     "Jyk7CiAgZG9jdW1lbnQuZ2V0RWxlbWVudEJ5SWQoJ2Zvcm1hdHMtbGlzdCcpLmlubmVySFRNTCA9" +
-    "ICc8ZGl2IGNsYXNzPSJlbXB0eSI+PHNwYW4gY2xhc3M9ImxvYWRlciI+PC9zcGFuPkdlbmVyYXRp" +
-    "bmcuLi48L2Rpdj4nOwogIHZhciB0cmVuZExpc3QgPSAnJzsKICBmb3IgKHZhciBpID0gMDsgaSA8" +
-    "IHNhdmVkLmxlbmd0aDsgaSsrKSB7CiAgICB0cmVuZExpc3QgKz0gKGkgKyAxKSArICcuICInICsg" +
-    "c2F2ZWRbaV0ubmFtZSArICciOiAnICsgc2F2ZWRbaV0uZGVzYyArIChzYXZlZFtpXS50YWcgPyAn" +
-    "IFt0YWc6ICcgKyBzYXZlZFtpXS50YWcgKyAnXScgOiAnJykgKyAnXG4nOwogIH0KICB2YXIgcHJv" +
-    "bXB0ID0gWydZb3UgYXJlIGEgc2VuaW9yIHVuc2NyaXB0ZWQgVFYgZm9ybWF0IGRldmVsb3BlciBh" +
-    "dCBhIER1dGNoIHByb2R1Y3Rpb24gY29tcGFueSAoS1JPLU5DUlYsIEJOTlZBUkEsIFRhbHBhKS4n" +
-    "LCAnR2VuZXJhdGUgZm9ybWF0IGNvbmNlcHRzIGZyb20gdGhlc2UgY3VsdHVyYWwgdHJlbmRzIHNw" +
-    "b3R0ZWQgaW4gRHV0Y2ggbWVkaWEgdG9kYXk6JywgJycsIHRyZW5kTGlzdCwgJycsICdSZXR1cm4g" +
-    "T05MWSBhIEpTT04gb2JqZWN0IHN0YXJ0aW5nIHdpdGggeyBlbmRpbmcgd2l0aCB9OicsICd7ImZv" +
-    "cm1hdHMiOlt7InRpdGxlIjoiRm9ybWF0IHRpdGxlIiwibG9nbGluZSI6Ik9uZSBwdW5jaHkgc2Vu" +
-    "dGVuY2UuIiwidHJlbmRCYXNpcyI6IldoaWNoIHRyZW5kKHMpIiwiaG9vayI6IldoYXQgbWFrZXMg" +
-    "dGhpcyBlbW90aW9uYWxseSBjb21wZWxsaW5nIGZvciBEdXRjaCBhdWRpZW5jZT8iLCJjaGFubmVs" +
-    "IjoiZS5nLiBOUE8xLCBSVEw0LCBOZXRmbGl4IE5MIn1dfScsICcnLCAnR2VuZXJhdGUgZXhhY3Rs" +
-    "eSAzIHNwZWNpZmljLCBwaXRjaGFibGUgZm9ybWF0IGNvbmNlcHRzLiddLmpvaW4oJ1xuJyk7CiAg" +
-    "ZmV0Y2goJy9jaGF0JywgeyBtZXRob2Q6ICdQT1NUJywgaGVhZGVyczogeyAnQ29udGVudC1UeXBl" +
-    "JzogJ2FwcGxpY2F0aW9uL2pzb24nIH0sIGJvZHk6IEpTT04uc3RyaW5naWZ5KHsgbWF4X3Rva2Vu" +
-    "czogMTIwMCwgbWVzc2FnZXM6IFt7IHJvbGU6ICd1c2VyJywgY29udGVudDogcHJvbXB0IH1dIH0p" +
-    "IH0pCiAgLnRoZW4oZnVuY3Rpb24ocikgeyByZXR1cm4gci5qc29uKCk7IH0pCiAgLnRoZW4oZnVu" +
-    "Y3Rpb24oZCkgewogICAgdmFyIGJsb2NrcyA9IGQuY29udGVudCB8fCBbXTsgdmFyIHRleHQgPSAn" +
-    "JzsKICAgIGZvciAodmFyIGkgPSAwOyBpIDwgYmxvY2tzLmxlbmd0aDsgaSsrKSB7IGlmIChibG9j" +
-    "a3NbaV0udHlwZSA9PT0gJ3RleHQnKSB0ZXh0ICs9IGJsb2Nrc1tpXS50ZXh0OyB9CiAgICB2YXIg" +
-    "bWF0Y2ggPSB0ZXh0LnJlcGxhY2UoL2BgYGpzb25cbj8vZywgJycpLnJlcGxhY2UoL2BgYFxuPy9n" +
-    "LCAnJykudHJpbSgpLm1hdGNoKC9ce1tcc1xTXSpcfS8pOwogICAgaWYgKCFtYXRjaCkgdGhyb3cg" +
-    "bmV3IEVycm9yKCdObyBKU09OJyk7CiAgICB2YXIgcmVzdWx0ID0gSlNPTi5wYXJzZShtYXRjaFsw" +
-    "XSk7IHZhciBodG1sID0gJyc7CiAgICBmb3IgKHZhciBpID0gMDsgaSA8IHJlc3VsdC5mb3JtYXRz" +
-    "Lmxlbmd0aDsgaSsrKSB7CiAgICAgIHZhciBmID0gcmVzdWx0LmZvcm1hdHNbaV07CiAgICAgIGh0" +
-    "bWwgKz0gJzxkaXYgY2xhc3M9ImZvcm1hdC1pdGVtIj48ZGl2IGNsYXNzPSJmb3JtYXQtdGl0bGUi" +
-    "PicgKyBmLnRpdGxlICsgJzwvZGl2PjxkaXYgY2xhc3M9ImZvcm1hdC1sb2dsaW5lIj4nICsgZi5s" +
-    "b2dsaW5lICsgJzwvZGl2Pic7CiAgICAgIGh0bWwgKz0gJzxkaXYgc3R5bGU9ImRpc3BsYXk6Zmxl" +
-    "eDtnYXA6NnB4O2ZsZXgtd3JhcDp3cmFwO21hcmdpbi10b3A6NXB4Ij48c3BhbiBjbGFzcz0iY2hp" +
-    "cCI+JyArIGYuY2hhbm5lbCArICc8L3NwYW4+PHNwYW4gY2xhc3M9ImNoaXAiPicgKyBmLnRyZW5k" +
-    "QmFzaXMgKyAnPC9zcGFuPjwvZGl2Pic7CiAgICAgIGh0bWwgKz0gJzxkaXYgY2xhc3M9ImZvcm1h" +
-    "dC1ob29rIj4iJyArIGYuaG9vayArICciPC9kaXY+PC9kaXY+JzsKICAgIH0KICAgIGRvY3VtZW50" +
-    "LmdldEVsZW1lbnRCeUlkKCdmb3JtYXRzLWxpc3QnKS5pbm5lckhUTUwgPSBodG1sOwogIH0pCiAg" +
-    "LmNhdGNoKGZ1bmN0aW9uKGUpIHsgc2hvd0VycignRm9ybWF0IGdlbmVyYXRpb24gZmFpbGVkOiAn" +
-    "ICsgZS5tZXNzYWdlKTsgZG9jdW1lbnQuZ2V0RWxlbWVudEJ5SWQoJ2Zvcm1hdHMtbGlzdCcpLmlu" +
-    "bmVySFRNTCA9ICc8ZGl2IGNsYXNzPSJlbXB0eSI+RmFpbGVkLjwvZGl2Pic7IH0pOwp9CgpmdW5j" +
-    "dGlvbiBsb2FkUmVzZWFyY2goKSB7CiAgZmV0Y2goJy9yZXNlYXJjaCcpLnRoZW4oZnVuY3Rpb24o" +
-    "cikgeyByZXR1cm4gci5qc29uKCk7IH0pLnRoZW4oZnVuY3Rpb24oZCkgeyByZW5kZXJSZXNlYXJj" +
-    "aChkLml0ZW1zIHx8IFtdKTsgfSkKICAuY2F0Y2goZnVuY3Rpb24oKSB7IGRvY3VtZW50LmdldEVs" +
-    "ZW1lbnRCeUlkKCdyZXNlYXJjaC1mZWVkJykuaW5uZXJIVE1MID0gJzxkaXYgY2xhc3M9ImVtcHR5" +
-    "Ij5Db3VsZCBub3QgbG9hZCByZXNlYXJjaC48L2Rpdj4nOyB9KTsKfQoKZnVuY3Rpb24gcmVuZGVy" +
-    "UmVzZWFyY2goaXRlbXMpIHsKICB2YXIgZWwgPSBkb2N1bWVudC5nZXRFbGVtZW50QnlJZCgncmVz" +
-    "ZWFyY2gtZmVlZCcpOwogIGlmICghaXRlbXMubGVuZ3RoKSB7IGVsLmlubmVySFRNTCA9ICc8ZGl2" +
-    "IGNsYXNzPSJlbXB0eSI+Tm8gcmVzZWFyY2ggaXRlbXMgZm91bmQuPC9kaXY+JzsgcmV0dXJuOyB9" +
-    "CiAgdmFyIHR5cGVNYXAgPSB7IHJlc2VhcmNoOiAnUmVzZWFyY2gnLCBjdWx0dXJlOiAnQ3VsdHVy" +
-    "ZScsIHRyZW5kczogJ1RyZW5kcycgfTsgdmFyIGh0bWwgPSAnJzsKICBmb3IgKHZhciBpID0gMDsg" +
-    "aSA8IGl0ZW1zLmxlbmd0aDsgaSsrKSB7CiAgICB2YXIgaXRlbSA9IGl0ZW1zW2ldOwogICAgaHRt" +
-    "bCArPSAnPGRpdiBjbGFzcz0icmVzZWFyY2gtaXRlbSI+PGRpdiBjbGFzcz0icmVzZWFyY2gtdGl0" +
-    "bGUiPjxhIGhyZWY9IicgKyBpdGVtLnVybCArICciIHRhcmdldD0iX2JsYW5rIj4nICsgaXRlbS50" +
-    "aXRsZSArICc8L2E+PC9kaXY+JzsKICAgIGlmIChpdGVtLmRlc2MpIGh0bWwgKz0gJzxkaXYgY2xh" +
-    "c3M9InJlc2VhcmNoLWRlc2MiPicgKyBpdGVtLmRlc2MgKyAnPC9kaXY+JzsKICAgIGh0bWwgKz0g" +
-    "JzxkaXYgY2xhc3M9InJlc2VhcmNoLW1ldGEiPjxzcGFuIGNsYXNzPSJyLXNyYyI+JyArIGl0ZW0u" +
-    "c291cmNlICsgJzwvc3Bhbj48c3BhbiBjbGFzcz0ici10eXBlIj4nICsgKHR5cGVNYXBbaXRlbS50" +
-    "eXBlXSB8fCBpdGVtLnR5cGUpICsgJzwvc3Bhbj48L2Rpdj48L2Rpdj4nOwogIH0KICBlbC5pbm5l" +
-    "ckhUTUwgPSBodG1sOwp9CgpmdW5jdGlvbiBsb2FkQXJjaGl2ZSgpIHsKICBkb2N1bWVudC5nZXRF" +
-    "bGVtZW50QnlJZCgnZGF0ZS1saXN0JykuaW5uZXJIVE1MID0gJzxkaXYgY2xhc3M9ImVtcHR5IiBz" +
-    "dHlsZT0icGFkZGluZzoxcmVtIDAiPjxzcGFuIGNsYXNzPSJsb2FkZXIiPjwvc3Bhbj48L2Rpdj4n" +
-    "OwogIGZldGNoKCcvYXJjaGl2ZS9kYXRlcycpLnRoZW4oZnVuY3Rpb24ocikgeyByZXR1cm4gci5q" +
-    "c29uKCk7IH0pCiAgLnRoZW4oZnVuY3Rpb24oZCkgewogICAgaWYgKCFkLmRhdGVzIHx8ICFkLmRh" +
-    "dGVzLmxlbmd0aCkgeyBkb2N1bWVudC5nZXRFbGVtZW50QnlJZCgnZGF0ZS1saXN0JykuaW5uZXJI" +
-    "VE1MID0gJzxkaXYgY2xhc3M9ImVtcHR5IiBzdHlsZT0icGFkZGluZzoxcmVtIDA7Zm9udC1zaXpl" +
-    "OjExcHgiPk5vIGFyY2hpdmVkIHRyZW5kcyB5ZXQuPC9kaXY+JzsgcmV0dXJuOyB9CiAgICB2YXIg" +
-    "aHRtbCA9ICcnOwogICAgZm9yICh2YXIgaSA9IDA7IGkgPCBkLmRhdGVzLmxlbmd0aDsgaSsrKSB7" +
-    "IGh0bWwgKz0gJzxkaXYgY2xhc3M9ImRhdGUtaXRlbSIgb25jbGljaz0ibG9hZERhdGUoXCcnICsg" +
-    "ZC5kYXRlc1tpXS5kYXRlICsgJ1wnLHRoaXMpIj4nICsgZC5kYXRlc1tpXS5kYXRlICsgJzxzcGFu" +
-    "IGNsYXNzPSJkYXRlLWNvdW50Ij4nICsgZC5kYXRlc1tpXS5jb3VudCArICc8L3NwYW4+PC9kaXY+" +
-    "JzsgfQogICAgZG9jdW1lbnQuZ2V0RWxlbWVudEJ5SWQoJ2RhdGUtbGlzdCcpLmlubmVySFRNTCA9" +
-    "IGh0bWw7CiAgICB2YXIgZmlyc3QgPSBkb2N1bWVudC5xdWVyeVNlbGVjdG9yKCcuZGF0ZS1pdGVt" +
-    "Jyk7IGlmIChmaXJzdCkgZmlyc3QuY2xpY2soKTsKICB9KQogIC5jYXRjaChmdW5jdGlvbihlKSB7" +
-    "IGRvY3VtZW50LmdldEVsZW1lbnRCeUlkKCdhcmNoaXZlLWVycicpLmlubmVySFRNTCA9ICc8ZGl2" +
-    "IGNsYXNzPSJlcnJib3giPkNvdWxkIG5vdCBsb2FkIGFyY2hpdmU6ICcgKyBlLm1lc3NhZ2UgKyAn" +
-    "PC9kaXY+JzsgfSk7Cn0KCmZ1bmN0aW9uIGxvYWREYXRlKGRhdGUsIGVsKSB7CiAgdmFyIGl0ZW1z" +
-    "ID0gZG9jdW1lbnQucXVlcnlTZWxlY3RvckFsbCgnLmRhdGUtaXRlbScpOyBmb3IgKHZhciBpID0g" +
-    "MDsgaSA8IGl0ZW1zLmxlbmd0aDsgaSsrKSBpdGVtc1tpXS5jbGFzc0xpc3QucmVtb3ZlKCdhY3Rp" +
-    "dmUnKTsKICBlbC5jbGFzc0xpc3QuYWRkKCdhY3RpdmUnKTsKICBkb2N1bWVudC5nZXRFbGVtZW50" +
-    "QnlJZCgnYXJjaGl2ZS1oZWFkaW5nJykudGV4dENvbnRlbnQgPSAnU2F2ZWQgb24gJyArIGRhdGU7" +
-    "CiAgZG9jdW1lbnQuZ2V0RWxlbWVudEJ5SWQoJ2FyY2hpdmUtY29udGVudCcpLmlubmVySFRNTCA9" +
-    "ICc8ZGl2IGNsYXNzPSJlbXB0eSI+PHNwYW4gY2xhc3M9ImxvYWRlciI+PC9zcGFuPjwvZGl2Pic7" +
-    "CiAgZmV0Y2goJy9hcmNoaXZlL2J5LWRhdGU/ZGF0ZT0nICsgZW5jb2RlVVJJQ29tcG9uZW50KGRh" +
-    "dGUpKS50aGVuKGZ1bmN0aW9uKHIpIHsgcmV0dXJuIHIuanNvbigpOyB9KQogIC50aGVuKGZ1bmN0" +
-    "aW9uKGQpIHsKICAgIGlmICghZC50cmVuZHMgfHwgIWQudHJlbmRzLmxlbmd0aCkgeyBkb2N1bWVu" +
-    "dC5nZXRFbGVtZW50QnlJZCgnYXJjaGl2ZS1jb250ZW50JykuaW5uZXJIVE1MID0gJzxkaXYgY2xh" +
-    "c3M9ImVtcHR5Ij5ObyB0cmVuZHMgZm9yIHRoaXMgZGF0ZS48L2Rpdj4nOyByZXR1cm47IH0KICAg" +
-    "IHZhciBodG1sID0gJyc7CiAgICBmb3IgKHZhciBpID0gMDsgaSA8IGQudHJlbmRzLmxlbmd0aDsg" +
-    "aSsrKSB7CiAgICAgIHZhciB0ID0gZC50cmVuZHNbaV07CiAgICAgIHZhciBtY01hcCA9IHsgcmlz" +
-    "aW5nOiAnYi1yaXNpbmcnLCBlbWVyZ2luZzogJ2ItZW1lcmdpbmcnLCBlc3RhYmxpc2hlZDogJ2It" +
-    "ZXN0YWJsaXNoZWQnLCBzaGlmdGluZzogJ2Itc2hpZnRpbmcnIH07CiAgICAgIHZhciBtYyA9IG1j" +
-    "TWFwW3QubW9tZW50dW1dIHx8ICdiLWVtZXJnaW5nJzsgdmFyIGxpbmtzID0gW107CiAgICAgIHRy" +
-    "eSB7IGxpbmtzID0gSlNPTi5wYXJzZSh0LnNvdXJjZV9saW5rcyB8fCAnW10nKTsgfSBjYXRjaChl" +
-    "KSB7fQogICAgICBodG1sICs9ICc8ZGl2IGNsYXNzPSJhcmNoLWl0ZW0iPjxkaXYgc3R5bGU9ImRp" +
-    "c3BsYXk6ZmxleDthbGlnbi1pdGVtczpjZW50ZXI7Z2FwOjhweDttYXJnaW4tYm90dG9tOjNweCI+" +
-    "PGRpdiBjbGFzcz0iYXJjaC1uYW1lIj4nICsgdC5uYW1lICsgJzwvZGl2PjxzcGFuIGNsYXNzPSJi" +
-    "YWRnZSAnICsgbWMgKyAnIj4nICsgKHQubW9tZW50dW0gfHwgJycpICsgJzwvc3Bhbj48L2Rpdj4n" +
-    "OwogICAgICBodG1sICs9ICc8ZGl2IGNsYXNzPSJhcmNoLW1ldGEiPicgKyB0LnNhdmVkX2F0ICsg" +
-    "KHQucmVnaW9uID8gJyAmbWlkZG90OyAnICsgdC5yZWdpb24udG9VcHBlckNhc2UoKSA6ICcnKSAr" +
-    "ICh0LnRhZyA/ICcgJm1pZGRvdDsgJyArIHQudGFnIDogJycpICsgJzwvZGl2Pic7CiAgICAgIGh0" +
-    "bWwgKz0gJzxkaXYgY2xhc3M9ImFyY2gtZGVzYyI+JyArICh0LmRlc2MgfHwgJycpICsgJzwvZGl2" +
-    "Pic7CiAgICAgIGZvciAodmFyIGwgPSAwOyBsIDwgbGlua3MubGVuZ3RoOyBsKyspIHsgaHRtbCAr" +
-    "PSAnPGEgY2xhc3M9ImFyY2gtbGluayIgaHJlZj0iJyArIGxpbmtzW2xdLnVybCArICciIHRhcmdl" +
-    "dD0iX2JsYW5rIj4nICsgbGlua3NbbF0udGl0bGUgKyAnPC9hPic7IH0KICAgICAgaHRtbCArPSAn" +
-    "PC9kaXY+JzsKICAgIH0KICAgIGRvY3VtZW50LmdldEVsZW1lbnRCeUlkKCdhcmNoaXZlLWNvbnRl" +
-    "bnQnKS5pbm5lckhUTUwgPSBodG1sOwogIH0pCiAgLmNhdGNoKGZ1bmN0aW9uKCkgeyBkb2N1bWVu" +
-    "dC5nZXRFbGVtZW50QnlJZCgnYXJjaGl2ZS1jb250ZW50JykuaW5uZXJIVE1MID0gJzxkaXYgY2xh" +
-    "c3M9ImVtcHR5Ij5Db3VsZCBub3QgbG9hZC48L2Rpdj4nOyB9KTsKfQo8L3NjcmlwdD4KPC9ib2R5" +
-    "Pgo8L2h0bWw+Cg=="
+    "ICc8ZGl2IGNsYXNzPSJlbXB0eSI+PHNwYW4gY2xhc3M9ImxvYWRlciI+PC9zcGFuPlJlYWRpbmcg" +
+    "eW91ciBjYXRhbG9ndWUgJmFtcDsgZ2VuZXJhdGluZyBpZGVhcy4uLjwvZGl2Pic7CiAgZmV0Y2go" +
+    "Jy9nZW5lcmF0ZS1mb3JtYXRzJywgewogICAgbWV0aG9kOiAnUE9TVCcsCiAgICBoZWFkZXJzOiB7" +
+    "ICdDb250ZW50LVR5cGUnOiAnYXBwbGljYXRpb24vanNvbicgfSwKICAgIGJvZHk6IEpTT04uc3Ry" +
+    "aW5naWZ5KHsgdHJlbmRzOiBzYXZlZCB9KQogIH0pCiAgLnRoZW4oZnVuY3Rpb24ocikgeyByZXR1" +
+    "cm4gci5qc29uKCk7IH0pCiAgLnRoZW4oZnVuY3Rpb24ocmVzdWx0KSB7CiAgICBpZiAocmVzdWx0" +
+    "LmVycm9yKSB0aHJvdyBuZXcgRXJyb3IocmVzdWx0LmVycm9yKTsKICAgIHZhciBmb3JtYXRzID0g" +
+    "cmVzdWx0LmZvcm1hdHMgfHwgW107CiAgICBpZiAoIWZvcm1hdHMubGVuZ3RoKSB0aHJvdyBuZXcg" +
+    "RXJyb3IoJ05vIGZvcm1hdHMgcmV0dXJuZWQnKTsKICAgIHZhciBodG1sID0gJyc7CiAgICBmb3Ig" +
+    "KHZhciBpID0gMDsgaSA8IGZvcm1hdHMubGVuZ3RoOyBpKyspIHsKICAgICAgdmFyIGYgPSBmb3Jt" +
+    "YXRzW2ldOwogICAgICBodG1sICs9ICc8ZGl2IGNsYXNzPSJmb3JtYXQtaXRlbSI+JzsKICAgICAg" +
+    "aHRtbCArPSAnPGRpdiBjbGFzcz0iZm9ybWF0LXRpdGxlIj4nICsgZi50aXRsZSArICc8L2Rpdj4n" +
+    "OwogICAgICBodG1sICs9ICc8ZGl2IGNsYXNzPSJmb3JtYXQtbG9nbGluZSI+JyArIGYubG9nbGlu" +
+    "ZSArICc8L2Rpdj4nOwogICAgICBodG1sICs9ICc8ZGl2IHN0eWxlPSJkaXNwbGF5OmZsZXg7Z2Fw" +
+    "OjZweDtmbGV4LXdyYXA6d3JhcDttYXJnaW4tdG9wOjVweCI+JzsKICAgICAgaHRtbCArPSAnPHNw" +
+    "YW4gY2xhc3M9ImNoaXAiPicgKyBmLmNoYW5uZWwgKyAnPC9zcGFuPic7CiAgICAgIGh0bWwgKz0g" +
+    "JzxzcGFuIGNsYXNzPSJjaGlwIj4nICsgZi50cmVuZEJhc2lzICsgJzwvc3Bhbj4nOwogICAgICBo" +
+    "dG1sICs9ICc8L2Rpdj4nOwogICAgICBpZiAoZi5ob29rKSBodG1sICs9ICc8ZGl2IGNsYXNzPSJm" +
+    "b3JtYXQtaG9vayI+IicgKyBmLmhvb2sgKyAnIjwvZGl2Pic7CiAgICAgIGlmIChmLndoeU5ldykg" +
+    "aHRtbCArPSAnPGRpdiBzdHlsZT0iZm9udC1zaXplOjExcHg7Y29sb3I6dmFyKC0tZ3JlZW4pO21h" +
+    "cmdpbi10b3A6NXB4O2ZvbnQtc3R5bGU6aXRhbGljIj4nICsgZi53aHlOZXcgKyAnPC9kaXY+JzsK" +
+    "ICAgICAgaHRtbCArPSAnPC9kaXY+JzsKICAgIH0KICAgIGRvY3VtZW50LmdldEVsZW1lbnRCeUlk" +
+    "KCdmb3JtYXRzLWxpc3QnKS5pbm5lckhUTUwgPSBodG1sOwogIH0pCiAgLmNhdGNoKGZ1bmN0aW9u" +
+    "KGUpIHsKICAgIHNob3dFcnIoJ0Zvcm1hdCBnZW5lcmF0aW9uIGZhaWxlZDogJyArIGUubWVzc2Fn" +
+    "ZSk7CiAgICBkb2N1bWVudC5nZXRFbGVtZW50QnlJZCgnZm9ybWF0cy1saXN0JykuaW5uZXJIVE1M" +
+    "ID0gJzxkaXYgY2xhc3M9ImVtcHR5Ij5GYWlsZWQuPC9kaXY+JzsKICB9KTsKfQoKZnVuY3Rpb24g" +
+    "bG9hZFJlc2VhcmNoKCkgewogIGZldGNoKCcvcmVzZWFyY2gnKS50aGVuKGZ1bmN0aW9uKHIpIHsg" +
+    "cmV0dXJuIHIuanNvbigpOyB9KS50aGVuKGZ1bmN0aW9uKGQpIHsgcmVuZGVyUmVzZWFyY2goZC5p" +
+    "dGVtcyB8fCBbXSk7IH0pCiAgLmNhdGNoKGZ1bmN0aW9uKCkgeyBkb2N1bWVudC5nZXRFbGVtZW50" +
+    "QnlJZCgncmVzZWFyY2gtZmVlZCcpLmlubmVySFRNTCA9ICc8ZGl2IGNsYXNzPSJlbXB0eSI+Q291" +
+    "bGQgbm90IGxvYWQgcmVzZWFyY2guPC9kaXY+JzsgfSk7Cn0KCmZ1bmN0aW9uIHJlbmRlclJlc2Vh" +
+    "cmNoKGl0ZW1zKSB7CiAgdmFyIGVsID0gZG9jdW1lbnQuZ2V0RWxlbWVudEJ5SWQoJ3Jlc2VhcmNo" +
+    "LWZlZWQnKTsKICBpZiAoIWl0ZW1zLmxlbmd0aCkgeyBlbC5pbm5lckhUTUwgPSAnPGRpdiBjbGFz" +
+    "cz0iZW1wdHkiPk5vIHJlc2VhcmNoIGl0ZW1zIGZvdW5kLjwvZGl2Pic7IHJldHVybjsgfQogIHZh" +
+    "ciB0eXBlTWFwID0geyByZXNlYXJjaDogJ1Jlc2VhcmNoJywgY3VsdHVyZTogJ0N1bHR1cmUnLCB0" +
+    "cmVuZHM6ICdUcmVuZHMnIH07IHZhciBodG1sID0gJyc7CiAgZm9yICh2YXIgaSA9IDA7IGkgPCBp" +
+    "dGVtcy5sZW5ndGg7IGkrKykgewogICAgdmFyIGl0ZW0gPSBpdGVtc1tpXTsKICAgIGh0bWwgKz0g" +
+    "JzxkaXYgY2xhc3M9InJlc2VhcmNoLWl0ZW0iPjxkaXYgY2xhc3M9InJlc2VhcmNoLXRpdGxlIj48" +
+    "YSBocmVmPSInICsgaXRlbS51cmwgKyAnIiB0YXJnZXQ9Il9ibGFuayI+JyArIGl0ZW0udGl0bGUg" +
+    "KyAnPC9hPjwvZGl2Pic7CiAgICBpZiAoaXRlbS5kZXNjKSBodG1sICs9ICc8ZGl2IGNsYXNzPSJy" +
+    "ZXNlYXJjaC1kZXNjIj4nICsgaXRlbS5kZXNjICsgJzwvZGl2Pic7CiAgICBodG1sICs9ICc8ZGl2" +
+    "IGNsYXNzPSJyZXNlYXJjaC1tZXRhIj48c3BhbiBjbGFzcz0ici1zcmMiPicgKyBpdGVtLnNvdXJj" +
+    "ZSArICc8L3NwYW4+PHNwYW4gY2xhc3M9InItdHlwZSI+JyArICh0eXBlTWFwW2l0ZW0udHlwZV0g" +
+    "fHwgaXRlbS50eXBlKSArICc8L3NwYW4+PC9kaXY+PC9kaXY+JzsKICB9CiAgZWwuaW5uZXJIVE1M" +
+    "ID0gaHRtbDsKfQoKZnVuY3Rpb24gbG9hZEFyY2hpdmUoKSB7CiAgZG9jdW1lbnQuZ2V0RWxlbWVu" +
+    "dEJ5SWQoJ2RhdGUtbGlzdCcpLmlubmVySFRNTCA9ICc8ZGl2IGNsYXNzPSJlbXB0eSIgc3R5bGU9" +
+    "InBhZGRpbmc6MXJlbSAwIj48c3BhbiBjbGFzcz0ibG9hZGVyIj48L3NwYW4+PC9kaXY+JzsKICBm" +
+    "ZXRjaCgnL2FyY2hpdmUvZGF0ZXMnKS50aGVuKGZ1bmN0aW9uKHIpIHsgcmV0dXJuIHIuanNvbigp" +
+    "OyB9KQogIC50aGVuKGZ1bmN0aW9uKGQpIHsKICAgIGlmICghZC5kYXRlcyB8fCAhZC5kYXRlcy5s" +
+    "ZW5ndGgpIHsgZG9jdW1lbnQuZ2V0RWxlbWVudEJ5SWQoJ2RhdGUtbGlzdCcpLmlubmVySFRNTCA9" +
+    "ICc8ZGl2IGNsYXNzPSJlbXB0eSIgc3R5bGU9InBhZGRpbmc6MXJlbSAwO2ZvbnQtc2l6ZToxMXB4" +
+    "Ij5ObyBhcmNoaXZlZCB0cmVuZHMgeWV0LjwvZGl2Pic7IHJldHVybjsgfQogICAgdmFyIGh0bWwg" +
+    "PSAnJzsKICAgIGZvciAodmFyIGkgPSAwOyBpIDwgZC5kYXRlcy5sZW5ndGg7IGkrKykgeyBodG1s" +
+    "ICs9ICc8ZGl2IGNsYXNzPSJkYXRlLWl0ZW0iIG9uY2xpY2s9ImxvYWREYXRlKFwnJyArIGQuZGF0" +
+    "ZXNbaV0uZGF0ZSArICdcJyx0aGlzKSI+JyArIGQuZGF0ZXNbaV0uZGF0ZSArICc8c3BhbiBjbGFz" +
+    "cz0iZGF0ZS1jb3VudCI+JyArIGQuZGF0ZXNbaV0uY291bnQgKyAnPC9zcGFuPjwvZGl2Pic7IH0K" +
+    "ICAgIGRvY3VtZW50LmdldEVsZW1lbnRCeUlkKCdkYXRlLWxpc3QnKS5pbm5lckhUTUwgPSBodG1s" +
+    "OwogICAgdmFyIGZpcnN0ID0gZG9jdW1lbnQucXVlcnlTZWxlY3RvcignLmRhdGUtaXRlbScpOyBp" +
+    "ZiAoZmlyc3QpIGZpcnN0LmNsaWNrKCk7CiAgfSkKICAuY2F0Y2goZnVuY3Rpb24oZSkgeyBkb2N1" +
+    "bWVudC5nZXRFbGVtZW50QnlJZCgnYXJjaGl2ZS1lcnInKS5pbm5lckhUTUwgPSAnPGRpdiBjbGFz" +
+    "cz0iZXJyYm94Ij5Db3VsZCBub3QgbG9hZCBhcmNoaXZlOiAnICsgZS5tZXNzYWdlICsgJzwvZGl2" +
+    "Pic7IH0pOwp9CgpmdW5jdGlvbiBsb2FkRGF0ZShkYXRlLCBlbCkgewogIHZhciBpdGVtcyA9IGRv" +
+    "Y3VtZW50LnF1ZXJ5U2VsZWN0b3JBbGwoJy5kYXRlLWl0ZW0nKTsgZm9yICh2YXIgaSA9IDA7IGkg" +
+    "PCBpdGVtcy5sZW5ndGg7IGkrKykgaXRlbXNbaV0uY2xhc3NMaXN0LnJlbW92ZSgnYWN0aXZlJyk7" +
+    "CiAgZWwuY2xhc3NMaXN0LmFkZCgnYWN0aXZlJyk7CiAgZG9jdW1lbnQuZ2V0RWxlbWVudEJ5SWQo" +
+    "J2FyY2hpdmUtaGVhZGluZycpLnRleHRDb250ZW50ID0gJ1NhdmVkIG9uICcgKyBkYXRlOwogIGRv" +
+    "Y3VtZW50LmdldEVsZW1lbnRCeUlkKCdhcmNoaXZlLWNvbnRlbnQnKS5pbm5lckhUTUwgPSAnPGRp" +
+    "diBjbGFzcz0iZW1wdHkiPjxzcGFuIGNsYXNzPSJsb2FkZXIiPjwvc3Bhbj48L2Rpdj4nOwogIGZl" +
+    "dGNoKCcvYXJjaGl2ZS9ieS1kYXRlP2RhdGU9JyArIGVuY29kZVVSSUNvbXBvbmVudChkYXRlKSku" +
+    "dGhlbihmdW5jdGlvbihyKSB7IHJldHVybiByLmpzb24oKTsgfSkKICAudGhlbihmdW5jdGlvbihk" +
+    "KSB7CiAgICBpZiAoIWQudHJlbmRzIHx8ICFkLnRyZW5kcy5sZW5ndGgpIHsgZG9jdW1lbnQuZ2V0" +
+    "RWxlbWVudEJ5SWQoJ2FyY2hpdmUtY29udGVudCcpLmlubmVySFRNTCA9ICc8ZGl2IGNsYXNzPSJl" +
+    "bXB0eSI+Tm8gdHJlbmRzIGZvciB0aGlzIGRhdGUuPC9kaXY+JzsgcmV0dXJuOyB9CiAgICB2YXIg" +
+    "aHRtbCA9ICcnOwogICAgZm9yICh2YXIgaSA9IDA7IGkgPCBkLnRyZW5kcy5sZW5ndGg7IGkrKykg" +
+    "ewogICAgICB2YXIgdCA9IGQudHJlbmRzW2ldOwogICAgICB2YXIgbWNNYXAgPSB7IHJpc2luZzog" +
+    "J2ItcmlzaW5nJywgZW1lcmdpbmc6ICdiLWVtZXJnaW5nJywgZXN0YWJsaXNoZWQ6ICdiLWVzdGFi" +
+    "bGlzaGVkJywgc2hpZnRpbmc6ICdiLXNoaWZ0aW5nJyB9OwogICAgICB2YXIgbWMgPSBtY01hcFt0" +
+    "Lm1vbWVudHVtXSB8fCAnYi1lbWVyZ2luZyc7IHZhciBsaW5rcyA9IFtdOwogICAgICB0cnkgeyBs" +
+    "aW5rcyA9IEpTT04ucGFyc2UodC5zb3VyY2VfbGlua3MgfHwgJ1tdJyk7IH0gY2F0Y2goZSkge30K" +
+    "ICAgICAgaHRtbCArPSAnPGRpdiBjbGFzcz0iYXJjaC1pdGVtIj48ZGl2IHN0eWxlPSJkaXNwbGF5" +
+    "OmZsZXg7YWxpZ24taXRlbXM6Y2VudGVyO2dhcDo4cHg7bWFyZ2luLWJvdHRvbTozcHgiPjxkaXYg" +
+    "Y2xhc3M9ImFyY2gtbmFtZSI+JyArIHQubmFtZSArICc8L2Rpdj48c3BhbiBjbGFzcz0iYmFkZ2Ug" +
+    "JyArIG1jICsgJyI+JyArICh0Lm1vbWVudHVtIHx8ICcnKSArICc8L3NwYW4+PC9kaXY+JzsKICAg" +
+    "ICAgaHRtbCArPSAnPGRpdiBjbGFzcz0iYXJjaC1tZXRhIj4nICsgdC5zYXZlZF9hdCArICh0LnJl" +
+    "Z2lvbiA/ICcgJm1pZGRvdDsgJyArIHQucmVnaW9uLnRvVXBwZXJDYXNlKCkgOiAnJykgKyAodC50" +
+    "YWcgPyAnICZtaWRkb3Q7ICcgKyB0LnRhZyA6ICcnKSArICc8L2Rpdj4nOwogICAgICBodG1sICs9" +
+    "ICc8ZGl2IGNsYXNzPSJhcmNoLWRlc2MiPicgKyAodC5kZXNjIHx8ICcnKSArICc8L2Rpdj4nOwog" +
+    "ICAgICBmb3IgKHZhciBsID0gMDsgbCA8IGxpbmtzLmxlbmd0aDsgbCsrKSB7IGh0bWwgKz0gJzxh" +
+    "IGNsYXNzPSJhcmNoLWxpbmsiIGhyZWY9IicgKyBsaW5rc1tsXS51cmwgKyAnIiB0YXJnZXQ9Il9i" +
+    "bGFuayI+JyArIGxpbmtzW2xdLnRpdGxlICsgJzwvYT4nOyB9CiAgICAgIGh0bWwgKz0gJzwvZGl2" +
+    "Pic7CiAgICB9CiAgICBkb2N1bWVudC5nZXRFbGVtZW50QnlJZCgnYXJjaGl2ZS1jb250ZW50Jyku" +
+    "aW5uZXJIVE1MID0gaHRtbDsKICB9KQogIC5jYXRjaChmdW5jdGlvbigpIHsgZG9jdW1lbnQuZ2V0" +
+    "RWxlbWVudEJ5SWQoJ2FyY2hpdmUtY29udGVudCcpLmlubmVySFRNTCA9ICc8ZGl2IGNsYXNzPSJl" +
+    "bXB0eSI+Q291bGQgbm90IGxvYWQuPC9kaXY+JzsgfSk7Cn0KPC9zY3JpcHQ+CjwvYm9keT4KPC9o" +
+    "dG1sPgo="
 )
 
 @app.route("/")
@@ -983,6 +1067,102 @@ def scrape():
 def research():
     items = gather_research()
     return jsonify({"items": items, "count": len(items)})
+
+@app.route("/formats-db")
+def formats_db():
+    """Return all formats from the Google Sheet."""
+    formats = get_formats_from_sheet()
+    return jsonify({"formats": formats, "count": len(formats)})
+
+@app.route("/match-trend", methods=["POST"])
+def match_trend():
+    """Find matching formats from the database for a given trend."""
+    body = request.json or {}
+    trend_name = body.get("name", "")
+    trend_desc = body.get("desc", "")
+    formats = get_formats_from_sheet()
+    if not formats:
+        return jsonify({"matches": [], "error": "Could not load format database"})
+    matches = match_formats_to_trend(trend_name, trend_desc, formats)
+    return jsonify({"matches": matches})
+
+@app.route("/generate-formats", methods=["POST"])
+def generate_formats():
+    """Generate format ideas using saved trends + catalogue context."""
+    body = request.json or {}
+    saved_trends = body.get("trends", [])
+    if not saved_trends:
+        return jsonify({"error": "No trends provided"})
+
+    # Load catalogue for context
+    formats = get_formats_from_sheet()
+
+    # Build catalogue summary for Claude
+    catalogue_context = ""
+    if formats:
+        # Genre distribution
+        genres = {}
+        topics = []
+        for f in formats:
+            g = f.get("genre", "").strip()
+            if g:
+                genres[g] = genres.get(g, 0) + 1
+            t = f.get("topic", "").strip()
+            if t:
+                topics.append(t)
+        genre_summary = ", ".join(["{} ({})".format(g, c) for g, c in sorted(genres.items(), key=lambda x: -x[1])[:8]])
+        # Sample of existing titles + synopses
+        sample = formats[:40]
+        catalogue_sample = "\n".join([
+            "- {} [{}]: {}".format(f["title"], f["genre"], f["synopsis"][:100])
+            for f in sample if f["title"]
+        ])
+        catalogue_context = (
+            "\n\nYour existing format catalogue context ({} formats):\n"
+            "Genre breakdown: {}\n\n"
+            "Sample of existing formats:\n{}\n\n"
+            "Use this catalogue to:\n"
+            "1. Understand the team's style, tone and genre preferences\n"
+            "2. Avoid duplicating concepts already in the catalogue\n"
+            "3. Identify genuine white spaces and fresh angles\n"
+            "4. Generate ideas that feel like they belong in this catalogue"
+        ).format(len(formats), genre_summary, catalogue_sample)
+
+    # Build trend list
+    trend_list = "\n".join([
+        "{}. \"{}\": {}{}".format(
+            i+1, t.get("name",""), t.get("desc",""),
+            " [tag: {}]".format(t.get("tag")) if t.get("tag") else ""
+        )
+        for i, t in enumerate(saved_trends)
+    ])
+
+    prompt = (
+        "You are a senior unscripted TV format developer at a Dutch production company (KRO-NCRV, BNNVARA, Talpa)."
+        "{}"
+        "\n\nGenerate format concepts inspired by these cultural trends spotted in Dutch media today:\n\n{}\n\n"
+        "Return ONLY a JSON object starting with {{ ending with }}:\n"
+        "{{\"formats\":[{{\"title\":\"Format title\",\"logline\":\"One punchy sentence.\","
+        "\"trendBasis\":\"Which trend(s)\",\"hook\":\"What makes this emotionally compelling for Dutch audience?\","
+        "\"channel\":\"e.g. NPO1, RTL4, Netflix NL\",\"whyNew\":\"One sentence on why this fills a gap in the catalogue\"}}]}}\n\n"
+        "Generate exactly 3 specific, pitchable format concepts. Make them feel fresh and distinct from the existing catalogue."
+    ).format(catalogue_context, trend_list)
+
+    try:
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1400,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = message.content[0].text
+        cleaned = text.replace("```json\n", "").replace("```\n", "").replace("```", "").strip()
+        match = re.search(r'\{[\s\S]*\}', cleaned)
+        if not match:
+            return jsonify({"error": "No JSON in response"})
+        result = json.loads(match.group(0))
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)})
 
 @app.route("/chat", methods=["POST"])
 def chat():
