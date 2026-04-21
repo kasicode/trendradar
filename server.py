@@ -1115,11 +1115,22 @@ def index():
     import base64
     return base64.b64decode(_HTML_B64).decode()
 
+SCRAPER_URL = "https://web-production-3d190.up.railway.app"
+
 @app.route("/scrape", methods=["POST"])
 def scrape():
     body = request.json or {}
-    items = gather_all_headlines(body.get("region", "nl"))
-    return jsonify({"items": items, "count": len(items)})
+    region = body.get("region", "nl")
+    try:
+        r = requests.post(
+            SCRAPER_URL + "/scrape",
+            json={"region": region},
+            timeout=25
+        )
+        return jsonify(r.json())
+    except Exception as e:
+        print("[scraper proxy error] {}".format(e))
+        return jsonify({"items": [], "count": 0, "error": str(e)})
 
 @app.route("/research")
 def research():
