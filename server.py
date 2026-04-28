@@ -713,8 +713,7 @@ _HTML_B64 = (
     "dzwvc3Bhbj4KICAgIDxzcGFuIGNsYXNzPSJzcmMtcGlsbCBvbiI+TGliZWxsZTwvc3Bhbj4KICAg" +
     "IDxzcGFuIGNsYXNzPSJzcmMtcGlsbCBvbiI+TGluZGEubmw8L3NwYW4+CiAgICA8c3BhbiBjbGFz" +
     "cz0ic3JjLXBpbGwgb24iPlJUTDwvc3Bhbj4KICAgIDxzcGFuIGNsYXNzPSJzcmMtcGlsbCBvbiI+" +
-    "Tk9TPC9zcGFuPgogICAgPHNwYW4gY2xhc3M9InNyYy1waWxsIG9uIj5WZXJvbmljYSBTdXBlcmd1" +
-    "aWRlPC9zcGFuPgogICAgPHNwYW4gY2xhc3M9InNyYy1waWxsIG9uIj5Hb29nbGUgVHJlbmRzPC9z" +
+    "Tk9TPC9zcGFuPgogICAgPHNwYW4gY2xhc3M9InNyYy1waWxsIG9uIj5Hb29nbGUgVHJlbmRzPC9z" +
     "cGFuPgogICAgPHNwYW4gY2xhc3M9InNyYy1waWxsIG9uIj5OWVQgQm9va3M8L3NwYW4+CiAgICA8" +
     "c3BhbiBjbGFzcz0ic3JjLXBpbGwgb24iPlNDUDwvc3Bhbj4KICAgIDxzcGFuIGNsYXNzPSJzcmMt" +
     "cGlsbCBvbiI+Q0JTPC9zcGFuPgogICAgPHNwYW4gY2xhc3M9InNyYy1waWxsIG9uIj5QZXcgUmVz" +
