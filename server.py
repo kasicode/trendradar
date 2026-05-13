@@ -396,7 +396,7 @@ def match_formats_to_trend(trend_name, trend_desc, formats):
         ])
         anthropic_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
         message = anthropic_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-5-20251001",
             max_tokens=600,
             messages=[{
                 "role": "user",
@@ -1371,7 +1371,7 @@ def generate_formats():
 
     try:
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-5-20251001",
             max_tokens=1400,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -1447,7 +1447,7 @@ def develop():
 
     try:
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-5-20251001",
             max_tokens=600,
             system=system,
             messages=messages
@@ -1460,7 +1460,7 @@ def develop():
 def chat():
     body = request.json
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-5-20251001",
         max_tokens=body.get("max_tokens", 2500),
         messages=body.get("messages", [])
     )
@@ -1553,7 +1553,7 @@ def archive_search():
 
     try:
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-5-20251001",
             max_tokens=600,
             messages=[{"role": "user", "content": prompt}]
         )
