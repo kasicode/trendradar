@@ -1464,7 +1464,11 @@ def chat():
         max_tokens=body.get("max_tokens", 2500),
         messages=body.get("messages", [])
     )
-    return jsonify({"content": [{"type": "text", "text": message.content[0].text}]})
+    raw_text = message.content[0].text
+    raw_text = raw_text.replace('\u2018', "'").replace('\u2019', "'")
+    raw_text = raw_text.replace('\u201c', '"').replace('\u201d', '"')
+    raw_text = raw_text.replace('\u2026', '...')
+    return jsonify({"content": [{"type": "text", "text": raw_text}]})
 
 @app.route("/archive/save", methods=["POST"])
 def archive_save():
