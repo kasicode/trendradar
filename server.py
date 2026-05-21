@@ -1480,7 +1480,7 @@ def chat():
             print("[chat] JSON parse failed on attempt {}, retrying...".format(attempt + 1))
             continue
     return jsonify({"content": [{"type": "text", "text": raw_text}]})
-
+@app.route("/archive/save", methods=["POST"])
 def archive_save():
     body = request.json
     conn = get_db()
