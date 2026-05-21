@@ -1455,7 +1455,6 @@ def develop():
         return jsonify({"response": message.content[0].text})
     except Exception as e:
         return jsonify({"error": str(e)})
-
 @app.route("/chat", methods=["POST"])
 def chat():
     body = request.json
@@ -1464,11 +1463,15 @@ def chat():
         max_tokens=body.get("max_tokens", 2500),
         messages=body.get("messages", [])
     )
-   raw_text = raw_text.replace('\u2026', '...')
+    raw_text = message.content[0].text
+    raw_text = raw_text.replace('\u2018', "'").replace('\u2019', "'")
+    raw_text = raw_text.replace('\u201c', '"').replace('\u201d', '"')
+    raw_text = raw_text.replace('\u2026', '...')
     raw_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', raw_text)
     return jsonify({"content": [{"type": "text", "text": raw_text}]})
 
 @app.route("/archive/save", methods=["POST"])
+
 def archive_save():
     body = request.json
     conn = get_db()
