@@ -339,7 +339,7 @@ def gather_research():
 
 # ── Google Sheets format database ────────────────────────────────────────────
 
-SHEET_ID = "1hriKOJaETWO69ty29cMuR9CPTvMa1X4N"
+SHEET_ID = "19eLYb8yPn9v10Rg-cZUkU-JFi2DjCdSb8CuuXMCgeqc"
 _formats_cache = {"data": [], "fetched_at": 0}
 
 def get_formats_from_sheet():
