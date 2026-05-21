@@ -1458,19 +1458,28 @@ def develop():
 @app.route("/chat", methods=["POST"])
 def chat():
     body = request.json
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=body.get("max_tokens", 2500),
-        messages=body.get("messages", [])
-    )
-    raw_text = message.content[0].text
-    raw_text = raw_text.replace('\u2018', "'").replace('\u2019', "'")
-    raw_text = raw_text.replace('\u201c', '"').replace('\u201d', '"')
-    raw_text = raw_text.replace('\u2026', '...')
-    raw_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', raw_text)
+    messages = body.get("messages", [])
+    max_tokens = body.get("max_tokens", 2500)
+    for attempt in range(3):
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=max_tokens,
+            messages=messages
+        )
+        raw_text = message.content[0].text
+        raw_text = raw_text.replace('\u2018', "'").replace('\u2019', "'")
+        raw_text = raw_text.replace('\u201c', '"').replace('\u201d', '"')
+        raw_text = raw_text.replace('\u2026', '...')
+        raw_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', raw_text)
+        try:
+            match = re.search(r'\{[\s\S]*\}', raw_text)
+            if match:
+                json.loads(match.group(0))
+            return jsonify({"content": [{"type": "text", "text": raw_text}]})
+        except Exception:
+            print("[chat] JSON parse failed on attempt {}, retrying...".format(attempt + 1))
+            continue
     return jsonify({"content": [{"type": "text", "text": raw_text}]})
-
-@app.route("/archive/save", methods=["POST"])
 
 def archive_save():
     body = request.json
