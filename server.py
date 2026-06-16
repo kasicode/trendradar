@@ -1459,7 +1459,7 @@ def develop():
 def chat():
     body = request.json
     messages = body.get("messages", [])
-    max_tokens = body.get("max_tokens", 2500)
+    max_tokens = body.get("max_tokens", 4000)
     for attempt in range(3):
         message = client.messages.create(
             model="claude-sonnet-4-6",
