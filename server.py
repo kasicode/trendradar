@@ -938,7 +938,7 @@ _HTML_B64 = (
     "ZSBVUkxzIGZyb20gbm9uLWV4Y2x1ZGVkIGhlYWRsaW5lcyBhYm92ZS4nCiAgXS5qb2luKCdcbicp" +
     "OwogIHJldHVybiBmZXRjaCgnL2NoYXQnLCB7IG1ldGhvZDogJ1BPU1QnLCBoZWFkZXJzOiB7ICdD" +
     "b250ZW50LVR5cGUnOiAnYXBwbGljYXRpb24vanNvbicgfSwgYm9keTogSlNPTi5zdHJpbmdpZnko" +
-    "eyBtYXhfdG9rZW5zOiAyNTAwLCBtZXNzYWdlczogW3sgcm9sZTogJ3VzZXInLCBjb250ZW50OiBw" +
+    "eyBtYXhfdG9rZW5zOiA0MDAwLCBtZXNzYWdlczogW3sgcm9sZTogJ3VzZXInLCBjb250ZW50OiBw" +
     "cm9tcHQgfV0gfSkgfSkKICAudGhlbihmdW5jdGlvbihyKSB7CiAgICBpZiAoIXIub2spIHRocm93" +
     "IG5ldyBFcnJvcignU2VydmVyIGVycm9yICcgKyByLnN0YXR1cyArICcgb24gL2NoYXQg4oCUIGNo" +
     "ZWNrIFJhaWx3YXkgbG9ncycpOwogICAgdmFyIGN0ID0gci5oZWFkZXJzLmdldCgnY29udGVudC10" +
@@ -1250,8 +1250,8 @@ _HTML_B64 = (
     "ZXRFbGVtZW50QnlJZCgnYXJjaGl2ZS1jb250ZW50JykuaW5uZXJIVE1MID0gaHRtbDsKICB9KQog" +
     "IC5jYXRjaChmdW5jdGlvbigpIHsgZG9jdW1lbnQuZ2V0RWxlbWVudEJ5SWQoJ2FyY2hpdmUtY29u" +
     "dGVudCcpLmlubmVySFRNTCA9ICc8ZGl2IGNsYXNzPSJlbXB0eSI+Q291bGQgbm90IGxvYWQuPC9k" +
-    "aXY+JzsgfSk7Cn0KPC9zY3JpcHQ+CjwvYm9keT4KPC9odG1sPgo="
-)
+    "aXY+JzsgfSk7Cn0KPC9zY3JpcHQ+CjwvYm9keT4KPC9odG1sPgo=")
+
 
 @app.route("/")
 def index():
